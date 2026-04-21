@@ -1,0 +1,64 @@
+{
+  "seed": [
+    {
+      "type": "geo",
+      "x": 300, "y": 20,
+      "props": { "w": 220, "h": 60, "geo": "rectangle", "color": "blue", "fill": "solid", "size": "m", "font": "draw", "align": "middle", "verticalAlign": "middle" },
+      "text": "Claude Code"
+    },
+    {
+      "type": "geo",
+      "x": 20, "y": 140,
+      "props": { "w": 250, "h": 270, "geo": "rectangle", "color": "green", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
+      "text": "MCP Server\n─────────\nlist_diagrams\ncreate_diagram\nread_diagram\nwrite_diagram\nappend_elements\ndelete_diagram\n\nRender: exportToSvg\n→ PNG inline in chat"
+    },
+    {
+      "type": "geo",
+      "x": 530, "y": 140,
+      "props": { "w": 250, "h": 270, "geo": "rectangle", "color": "orange", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
+      "text": "Viewer Server :3000\n─────────\nGET /api/diagrams\nGET /api/notes\nPUT /api/diagram/:name\nGET /api/svg  /api/png\nGET /api/history/:name\nGET /events (SSE)"
+    },
+    {
+      "type": "geo",
+      "x": 285, "y": 195,
+      "props": { "w": 230, "h": 85, "geo": "rectangle", "color": "grey", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
+      "text": "File Storage\n(EXCALIDRAW_ROOT)\n*.excalidraw  *.tldraw  *.md"
+    },
+    {
+      "type": "geo",
+      "x": 420, "y": 470,
+      "props": { "w": 285, "h": 90, "geo": "rectangle", "color": "violet", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
+      "text": "Browser Preview Pane\nExcalidraw · tldraw · Markdown\n[[wikilinks]] · ![[embeds]]"
+    },
+    {
+      "type": "arrow",
+      "x": 300, "y": 80,
+      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -150, "y": 60 } },
+      "text": "stdio JSON-RPC"
+    },
+    {
+      "type": "arrow",
+      "x": 520, "y": 80,
+      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": 130, "y": 60 } },
+      "text": "HTTP"
+    },
+    {
+      "type": "arrow",
+      "x": 145, "y": 410,
+      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": 155, "y": -125 } },
+      "text": ""
+    },
+    {
+      "type": "arrow",
+      "x": 655, "y": 410,
+      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -155, "y": -125 } },
+      "text": ""
+    },
+    {
+      "type": "arrow",
+      "x": 655, "y": 410,
+      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -90, "y": 60 } },
+      "text": "HTTP + SSE"
+    }
+  ]
+}

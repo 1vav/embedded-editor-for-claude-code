@@ -1,0 +1,330 @@
+import fs from "fs/promises";
+import { readFileSync } from "fs";
+import os from "os";
+import path from "path";
+import chalk from "chalk";
+import { DEFAULT_PORT } from "./paths.js";
+
+const CWD = process.cwd();
+
+const packageVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+
+// Read installed package versions for the version stamp.
+// Some packages block `require('pkg/package.json')` via exports map,
+// so read node_modules directly instead.
+function getVersion(pkg) {
+  try {
+    const pkgPath = new URL(`../node_modules/${pkg}/package.json`, import.meta.url);
+    return JSON.parse(readFileSync(pkgPath, "utf8")).version;
+  } catch { return "unknown"; }
+}
+
+const MCP_SERVER_ENTRY = {
+  command: "npx",
+  args: ["-y", `embedded-editor-for-claude-code@${packageVersion}`, "serve", "--mcp"],
+  env: { EXCALIDRAW_ROOT: "." },
+};
+
+function buildClaudeMdBlock() {
+  const excalidrawVer = getVersion("@excalidraw/excalidraw");
+  const tldrawVer     = getVersion("tldraw");
+
+  return `
+## Diagrams (Embedded Editor MCP)
+
+This project uses Embedded Editor for visual diagrams.
+<!-- embedded-editor-guide excalidraw@${excalidrawVer} tldraw@${tldrawVer} -->
+
+### MCP tools
+
+| Tool | What it does |
+|------|-------------|
+| \`list_diagrams\` | List all .excalidraw files |
+| \`create_diagram\` | Create a blank diagram; returns PNG preview |
+| \`read_diagram\` | Read current JSON + PNG |
+| \`write_diagram\` | Replace all elements; returns PNG |
+| \`append_elements\` | Add elements without touching existing ones; returns PNG |
+| \`delete_diagram\` | Delete a diagram file |
+| \`list_notes\` | List all Markdown notes |
+| \`create_note\` | Create a new blank note |
+| \`read_note\` | Read note content |
+| \`write_note\` | Write (replace) note content |
+| \`delete_note\` | Delete a note |
+| \`rename_file\` | Rename a file and update all wikilinks |
+| \`get_backlinks\` | Find files that link to a given file |
+| \`list_history\` | List saved diagram versions |
+| \`restore_snapshot\` | Restore a diagram to a saved version |
+| \`list_tldraw\` | List tldraw canvases |
+| \`read_tldraw\` | Read tldraw canvas JSON |
+
+### Workflow
+
+1. \`list_diagrams\` — see what exists
+2. \`read_diagram\` — always read before editing an existing diagram
+3. \`write_diagram\` or \`append_elements\` with valid Excalidraw JSON
+4. The PNG preview is returned inline — inspect it and iterate
+
+### Excalidraw element reference (v${excalidrawVer})
+
+Every element requires at minimum: \`type\`, \`x\`, \`y\`, \`width\`, \`height\`, \`id\` (use a short unique string).
+
+**Common props (all elements)**
+\`\`\`json
+{
+  "id": "el1",
+  "x": 100, "y": 100,
+  "width": 160, "height": 80,
+  "angle": 0,
+  "strokeColor": "#1e1e1e",
+  "backgroundColor": "#a5d8ff",
+  "fillStyle": "solid",
+  "strokeWidth": 2,
+  "strokeStyle": "solid",
+  "roughness": 1,
+  "opacity": 100,
+  "groupIds": [],
+  "roundness": { "type": 3 }
+}
+\`\`\`
+
+**Element types**
+- \`rectangle\` — box/node. Add \`"roundness": {"type": 3}\` for rounded corners.
+- \`ellipse\` — oval/circle
+- \`diamond\` — decision node
+- \`arrow\` — directional line. Use \`points\` array and bind with \`startBinding\`/\`endBinding\`.
+- \`line\` — non-directional line. Use \`points\` array.
+- \`text\` — label. Requires \`text\` and \`fontSize\` (default 20).
+- \`freedraw\` — freehand path
+
+**Colors** (use hex or Excalidraw palette names)
+- Stroke: \`"#1e1e1e"\` (dark), \`"#2f9e44"\` (green), \`"#1971c2"\` (blue), \`"#e03131"\` (red), \`"#f08c00"\` (orange)
+- Background: \`"transparent"\`, \`"#a5d8ff"\` (light blue), \`"#b2f2bb"\` (light green), \`"#ffec99"\` (yellow), \`"#ffc9c9"\` (light red)
+
+**fillStyle**: \`"hachure"\` (hatched), \`"solid"\`, \`"cross-hatch"\`, \`"dots"\`, \`"zigzag"\`, \`"none"\`
+**roughness**: 0 (clean), 1 (default), 2 (very rough)
+**strokeStyle**: \`"solid"\`, \`"dashed"\`, \`"dotted"\`
+
+**Arrow with bindings**
+\`\`\`json
+{
+  "type": "arrow",
+  "id": "arr1",
+  "x": 260, "y": 140,
+  "width": 80, "height": 0,
+  "points": [[0,0],[80,0]],
+  "startBinding": { "elementId": "box1", "focus": 0, "gap": 8 },
+  "endBinding":   { "elementId": "box2", "focus": 0, "gap": 8 },
+  "arrowType": "elbow",
+  "strokeColor": "#1e1e1e",
+  "backgroundColor": "transparent",
+  "fillStyle": "solid",
+  "strokeWidth": 2,
+  "roughness": 1,
+  "opacity": 100,
+  "groupIds": []
+}
+\`\`\`
+
+**Text label**
+\`\`\`json
+{
+  "type": "text",
+  "id": "lbl1",
+  "x": 110, "y": 130,
+  "width": 140, "height": 25,
+  "text": "My Label",
+  "fontSize": 16,
+  "fontFamily": 1,
+  "textAlign": "center",
+  "verticalAlign": "middle",
+  "strokeColor": "#1e1e1e",
+  "backgroundColor": "transparent",
+  "fillStyle": "solid",
+  "strokeWidth": 1,
+  "roughness": 1,
+  "opacity": 100,
+  "groupIds": []
+}
+\`\`\`
+
+**Grouping**: set the same \`groupIds\` string on multiple elements to group them visually.
+
+**Minimal working diagram example**
+\`\`\`json
+[
+  { "type": "rectangle", "id": "a", "x": 100, "y": 100, "width": 160, "height": 60,
+    "strokeColor": "#1971c2", "backgroundColor": "#a5d8ff", "fillStyle": "solid",
+    "strokeWidth": 2, "roughness": 1, "opacity": 100, "angle": 0, "groupIds": [] },
+  { "type": "text", "id": "b", "x": 115, "y": 120, "width": 130, "height": 20,
+    "text": "Hello World", "fontSize": 16, "fontFamily": 1,
+    "textAlign": "center", "verticalAlign": "middle",
+    "strokeColor": "#1971c2", "backgroundColor": "transparent",
+    "fillStyle": "solid", "strokeWidth": 1, "roughness": 1, "opacity": 100,
+    "angle": 0, "groupIds": [] }
+]
+\`\`\`
+
+### tldraw canvases (v${tldrawVer})
+
+tldraw files (\`.tldraw\`) are **browser-only** — open them in the viewer at http://127.0.0.1:${DEFAULT_PORT}.
+Claude cannot currently write tldraw files via MCP tools; use the browser editor directly.
+
+### Viewer
+
+Run \`npx embedded-editor serve\` → open http://127.0.0.1:${DEFAULT_PORT}
+- Browse all \`.excalidraw\`, \`.tldraw\`, and \`.md\` files in the sidebar
+- \`[[wikilinks]]\` in any file navigate between files
+- \`![[diagram.excalidraw]]\` in Markdown embeds a diagram inline
+- Live sync: Claude's edits appear instantly without reload
+`;
+}
+
+// ── Slash command content ────────────────────────────────────────────────────
+
+const START_COMMAND = `\
+---
+description: Start the Embedded Editor viewer (diagrams · canvases · notes)
+allowed-tools: Bash
+---
+
+Start the Embedded Editor viewer server in the background so you can browse and edit diagrams, tldraw canvases, and Markdown notes at http://127.0.0.1:3000.
+
+First check if it's already running:
+
+\`\`\`bash
+lsof -ti:3000 > /dev/null 2>&1 && echo "already_running" || echo "not_running"
+\`\`\`
+
+If not running, start it in the background and wait for it to be ready:
+
+\`\`\`bash
+npx embedded-editor-for-claude-code serve > /tmp/embedded-editor.log 2>&1 &
+sleep 2 && curl -sf http://127.0.0.1:3000 > /dev/null && echo "✓ Viewer ready" || echo "✗ Failed — check /tmp/embedded-editor.log"
+\`\`\`
+
+Tell the user the viewer is running at **http://127.0.0.1:3000** and they can open it in the preview pane (the ☁ button in Claude Code's toolbar) or directly in their browser. Use /editor-stop to shut it down.
+`;
+
+const STOP_COMMAND = `\
+---
+description: Stop the Embedded Editor viewer server
+allowed-tools: Bash
+---
+
+Stop the Embedded Editor viewer server that was started with /editor-serve.
+
+\`\`\`bash
+pkill -f "embedded-editor-for-claude-code" 2>/dev/null
+lsof -ti:3000 | xargs kill 2>/dev/null
+echo "done"
+\`\`\`
+
+Confirm to the user that the viewer has been stopped.
+`;
+
+async function writeCommands(commandsDir, isGlobal) {
+  await fs.mkdir(commandsDir, { recursive: true });
+  const scope = isGlobal ? "~/.claude/commands" : ".claude/commands";
+  const written = [];
+
+  for (const [file, content] of [["editor-start.md", START_COMMAND], ["editor-stop.md", STOP_COMMAND]]) {
+    const dest = path.join(commandsDir, file);
+    await fs.writeFile(dest, content, "utf8");
+    written.push(file.replace(".md", ""));
+  }
+
+  const cmds = written.map(n => chalk.cyan(`/${n}`)).join("  ");
+  console.log(chalk.green("  ✓ ") + chalk.white(scope) + chalk.gray(` — slash commands: ${cmds}`));
+}
+
+async function writeSettings(settingsPath, isGlobal) {
+  let existing = {};
+  try {
+    await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+    existing = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+  } catch { /* first run */ }
+
+  if (existing.mcpServers?.["embedded-editor"]) {
+    const scope = isGlobal ? "~/.claude/settings.json" : ".claude/settings.json";
+    console.log(chalk.gray(`  ↩ ${scope} already has embedded-editor server, skipped`));
+    return false;
+  }
+
+  const merged = {
+    ...existing,
+    mcpServers: {
+      ...(existing.mcpServers || {}),
+      "embedded-editor": MCP_SERVER_ENTRY,
+    },
+  };
+  await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf8");
+  return true;
+}
+
+export async function runInit({ global: isGlobal = false } = {}) {
+  const separator = chalk.gray("─".repeat(56));
+  console.log("\n" + separator);
+  console.log(chalk.green.bold("  embedded-editor init" + (isGlobal ? " --global" : "")));
+  console.log(separator + "\n");
+
+  // ── 1. MCP server registration + slash commands ─────────────────────────────
+  if (isGlobal) {
+    const globalSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const wrote = await writeSettings(globalSettingsPath, true);
+    if (wrote) {
+      console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server registered globally"));
+      console.log(chalk.gray("    Works in every folder; diagrams saved to wherever Claude Code is open."));
+    }
+    await writeCommands(path.join(os.homedir(), ".claude", "commands"), true);
+  } else {
+    const localSettingsPath = path.join(CWD, ".claude", "settings.json");
+    const wrote = await writeSettings(localSettingsPath, false);
+    if (wrote) {
+      console.log(chalk.green("  ✓ ") + chalk.white(".claude/settings.json") + chalk.gray(" — MCP server registered for this project"));
+    }
+    await writeCommands(path.join(CWD, ".claude", "commands"), false);
+  }
+
+  // ── 2. CLAUDE.md — only written for project-level init ──────────────────────
+  // For global init, each project manages its own CLAUDE.md. For per-project
+  // init, we write the full API reference so Claude has it in context.
+  if (!isGlobal) {
+    const CLAUDE_MD_BLOCK = buildClaudeMdBlock();
+    const claudeMdPath = path.join(CWD, "CLAUDE.md");
+    let claudeMdExists = false;
+    try { await fs.access(claudeMdPath); claudeMdExists = true; } catch {}
+
+    if (claudeMdExists) {
+      const existing = await fs.readFile(claudeMdPath, "utf8");
+      const sectionStart = existing.indexOf("\n## Diagrams (Embedded Editor MCP)");
+      if (sectionStart !== -1) {
+        await fs.writeFile(claudeMdPath, existing.slice(0, sectionStart) + CLAUDE_MD_BLOCK, "utf8");
+        console.log(chalk.green("  ✓ ") + chalk.white("CLAUDE.md") + chalk.gray(" — diagram guide updated to latest versions"));
+      } else {
+        await fs.appendFile(claudeMdPath, CLAUDE_MD_BLOCK, "utf8");
+        console.log(chalk.green("  ✓ ") + chalk.white("CLAUDE.md") + chalk.gray(" — diagram guide appended"));
+      }
+    } else {
+      await fs.writeFile(claudeMdPath, `# Project\n${CLAUDE_MD_BLOCK}`, "utf8");
+      console.log(chalk.green("  ✓ ") + chalk.white("CLAUDE.md") + chalk.gray(" — created with diagram guide"));
+    }
+  } else {
+    console.log(chalk.gray("  ℹ  CLAUDE.md — skipped (run `init` inside a project to add the API reference)"));
+  }
+
+  // ── 3. Summary ───────────────────────────────────────────────────────────────
+  console.log("");
+  console.log(separator);
+  console.log(chalk.green.bold("  Setup complete!"));
+  console.log(separator);
+  console.log("");
+  console.log(chalk.white("  Next steps:"));
+  console.log("");
+  console.log(chalk.gray("  1. Restart Claude Code — it will pick up the new MCP server"));
+  console.log(chalk.gray("  2. Ask Claude to create a diagram:"));
+  console.log(chalk.cyan('     "Draw an architecture diagram of this project"'));
+  console.log(chalk.gray("  3. Open the visual workspace with a slash command:"));
+  console.log(chalk.cyan("     /editor-start") + chalk.gray("  →  http://127.0.0.1:3000"));
+  console.log(chalk.cyan("     /editor-stop ") + chalk.gray("  →  shut it down"));
+  console.log(separator + "\n");
+}

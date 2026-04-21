@@ -1,0 +1,18 @@
+{
+  "name": "embedded-editor-for-claude-code",
+  "description": "Marketplace for the embedded-editor-for-claude-code plugin.",
+  "owner": {
+    "name": "1vav",
+    "url": "https://github.com/1vav"
+  },
+  "plugins": [
+    {
+      "name": "embedded-editor-for-claude-code",
+      "source": "./",
+      "description": "Visual workspace for Claude Code — Excalidraw diagrams with inline PNG previews, tldraw canvases, and Markdown notes with wikilinks.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["excalidraw", "tldraw", "diagrams", "markdown", "mcp", "drawing", "notes"]
+    }
+  ]
+}

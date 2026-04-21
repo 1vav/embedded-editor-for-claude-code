@@ -1,0 +1,20 @@
+{
+  "name": "embedded-editor-for-claude-code",
+  "version": "0.1.0",
+  "description": "Visual workspace for Claude Code — create and edit Excalidraw diagrams with inline PNG previews, plus a browser viewer for tldraw canvases and Markdown notes with wikilinks.",
+  "author": {
+    "name": "1vav",
+    "url": "https://github.com/1vav/embedded-editor-for-claude-code"
+  },
+  "homepage": "https://github.com/1vav/embedded-editor-for-claude-code",
+  "license": "MIT",
+  "userConfig": {
+    "scope": {
+      "description": "Install for all projects (global) or only the current project (project)",
+      "type": "enum",
+      "enum": ["global", "project"],
+      "default": "global",
+      "sensitive": false
+    }
+  }
+}

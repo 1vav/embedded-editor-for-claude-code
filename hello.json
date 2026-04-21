@@ -1,0 +1,20 @@
+{
+  "greeting": "Hello, World!",
+  "languages": [
+    { "name": "JavaScript", "ext": ".js", "bundled": true },
+    { "name": "Python",     "ext": ".py", "bundled": true },
+    { "name": "JSON",       "ext": ".json", "bundled": true },
+    { "name": "Go",         "ext": ".go",  "bundled": false },
+    { "name": "Rust",       "ext": ".rs",  "bundled": false },
+    { "name": "CSS",        "ext": ".css", "bundled": false }
+  ],
+  "features": {
+    "syntaxHighlighting": true,
+    "lineNumbers": true,
+    "foldGutter": true,
+    "bracketMatching": true,
+    "search": true,
+    "binaryDetection": true,
+    "crlfPreservation": true
+  }
+}
