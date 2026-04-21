@@ -183,26 +183,42 @@ Run \`npx embedded-editor serve\` → open http://127.0.0.1:${DEFAULT_PORT}
 
 const START_COMMAND = `\
 ---
-description: Start the Embedded Editor viewer (diagrams · canvases · notes)
-allowed-tools: Bash
+description: Start the Embedded Editor viewer (diagrams · canvases · notes · code)
+allowed-tools: Bash, Write, mcp__Claude_Preview__preview_start
 ---
 
-Start the Embedded Editor viewer server in the background so you can browse and edit diagrams, tldraw canvases, and Markdown notes at http://127.0.0.1:3000.
+Start the Embedded Editor viewer and open it in the preview pane automatically.
 
-First check if it's already running:
+**Step 1.** Ensure \`.claude/launch.json\` contains an entry for the Embedded Editor.
 
-\`\`\`bash
-lsof -ti:3000 > /dev/null 2>&1 && echo "already_running" || echo "not_running"
+Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" entry in its \`configurations\` array, add one. If the file doesn't exist yet, create it. The entry to add:
+
+\`\`\`json
+{
+  "name": "Embedded Editor",
+  "runtimeExecutable": "npx",
+  "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+  "port": 3000
+}
 \`\`\`
 
-If not running, start it in the background and wait for it to be ready:
+A minimal new file looks like:
 
-\`\`\`bash
-npx embedded-editor-for-claude-code serve > /tmp/embedded-editor.log 2>&1 &
-sleep 2 && curl -sf http://127.0.0.1:3000 > /dev/null && echo "✓ Viewer ready" || echo "✗ Failed — check /tmp/embedded-editor.log"
+\`\`\`json
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Embedded Editor",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+      "port": 3000
+    }
+  ]
+}
 \`\`\`
 
-Tell the user the viewer is running at **http://127.0.0.1:3000** and they can open it in the preview pane (the ☁ button in Claude Code's toolbar) or directly in their browser. Use /editor-stop to shut it down.
+**Step 2.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server and opens the preview pane pointing to http://127.0.0.1:3000 automatically.
 `;
 
 const STOP_COMMAND = `\
