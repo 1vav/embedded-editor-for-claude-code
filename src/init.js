@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import { readFileSync } from "fs";
+import { execSync } from "child_process";
 import os from "os";
 import path from "path";
 import chalk from "chalk";
@@ -196,8 +197,8 @@ Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" 
 \`\`\`json
 {
   "name": "Embedded Editor",
-  "runtimeExecutable": "npx",
-  "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+  "runtimeExecutable": "embedded-editor",
+  "runtimeArgs": ["serve"],
   "port": 3000
 }
 \`\`\`
@@ -210,8 +211,8 @@ A minimal new file looks like:
   "configurations": [
     {
       "name": "Embedded Editor",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+      "runtimeExecutable": "embedded-editor",
+      "runtimeArgs": ["serve"],
       "port": 3000
     }
   ]
@@ -256,8 +257,9 @@ async function writeCommands(commandsDir, isGlobal) {
 const SESSION_START_HOOK = {
   type: "command",
   // Start the viewer server in the background if nothing is on port 3000 yet.
+  // Uses the globally-installed binary when available (fast), falls back to npx.
   // Runs silently — output goes to /tmp/embedded-editor.log.
-  command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || npx --yes embedded-editor-for-claude-code@latest serve > /tmp/embedded-editor.log 2>&1 &`,
+  command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || (command -v embedded-editor > /dev/null 2>&1 && embedded-editor serve || npx --yes embedded-editor-for-claude-code@latest serve) > /tmp/embedded-editor.log 2>&1 &`,
 };
 
 function mergeSessionStartHook(existing) {
@@ -295,6 +297,18 @@ export async function runInit({ global: isGlobal = false } = {}) {
 
   // ── 1. MCP server registration + slash commands ─────────────────────────────
   if (isGlobal) {
+    // Install the package globally so `embedded-editor` binary is on PATH.
+    // This makes the SessionStart hook start in ~1s instead of ~15s (no npx resolution).
+    process.stdout.write(chalk.gray("  Installing embedded-editor globally…"));
+    try {
+      execSync("npm install -g embedded-editor-for-claude-code@latest", { stdio: "pipe" });
+      process.stdout.write(" " + chalk.green("✓") + "\n");
+      console.log(chalk.green("  ✓ ") + chalk.white("embedded-editor") + chalk.gray(" installed globally — viewer starts in ~1s"));
+    } catch (e) {
+      process.stdout.write(" " + chalk.yellow("⚠") + "\n");
+      console.log(chalk.yellow("  ⚠ ") + chalk.gray("global install failed (will fall back to npx): " + e.message.split("\n")[0]));
+    }
+
     const globalSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
     await writeSettings(globalSettingsPath);
     console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server + auto-start hook registered globally"));
@@ -343,10 +357,14 @@ export async function runInit({ global: isGlobal = false } = {}) {
   console.log(chalk.white("  Next steps:"));
   console.log("");
   console.log(chalk.gray("  1. Restart Claude Code — it will pick up the new MCP server"));
+  console.log(chalk.gray("     The viewer starts automatically (~1s) on each new session."));
   console.log(chalk.gray("  2. Ask Claude to create a diagram:"));
   console.log(chalk.cyan('     "Draw an architecture diagram of this project"'));
   console.log(chalk.gray("  3. Open the visual workspace with a slash command:"));
   console.log(chalk.cyan("     /editor-start") + chalk.gray("  →  http://127.0.0.1:3000"));
   console.log(chalk.cyan("     /editor-stop ") + chalk.gray("  →  shut it down"));
+  console.log("");
+  console.log(chalk.gray("  To update later:"));
+  console.log(chalk.cyan("     npx embedded-editor-for-claude-code@latest init --global"));
   console.log(separator + "\n");
 }
