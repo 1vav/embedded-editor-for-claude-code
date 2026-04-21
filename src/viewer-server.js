@@ -24,13 +24,17 @@
 import http  from "http";
 import path  from "path";
 import fs    from "fs/promises";
-import { writeFileSync } from "fs";
+import { writeFileSync, readFileSync } from "fs";
 import { watch }         from "fs";
 import { glob }          from "glob";
 import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
+
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8")
+).version;
 
 const CWD        = ROOT;
 const VENDOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "vendor");
@@ -287,10 +291,10 @@ function appHtml() {
 <head>
   <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Embedded Editor</title>
-  <link rel="stylesheet" href="/vendor/viewer.css">
+  <link rel="stylesheet" href="/vendor/viewer.css?v=${PACKAGE_VERSION}">
   <style>*{box-sizing:border-box}html,body,#root{margin:0;padding:0;height:100%;overflow:hidden;background:#0d0d0d}</style>
 </head>
-<body><div id="root"></div><script type="module" src="/vendor/viewer.js"></script></body>
+<body><div id="root"></div><script type="module" src="/vendor/viewer.js?v=${PACKAGE_VERSION}"></script></body>
 </html>`;
 }
 
