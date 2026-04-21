@@ -253,7 +253,23 @@ async function writeCommands(commandsDir, isGlobal) {
   console.log(chalk.green("  ✓ ") + chalk.white(scope) + chalk.gray(` — slash commands: ${cmds}`));
 }
 
-async function writeSettings(settingsPath, isGlobal) {
+const SESSION_START_HOOK = {
+  type: "command",
+  // Start the viewer server in the background if nothing is on port 3000 yet.
+  // Runs silently — output goes to /tmp/embedded-editor.log.
+  command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || npx --yes embedded-editor-for-claude-code@latest serve > /tmp/embedded-editor.log 2>&1 &`,
+};
+
+function mergeSessionStartHook(existing) {
+  const hooks = existing.hooks ? JSON.parse(JSON.stringify(existing.hooks)) : {};
+  const starts = hooks.SessionStart || [];
+  // Remove any previous embedded-editor hook, then append the current one.
+  const filtered = starts.filter(h => !String(h.command || "").includes("embedded-editor-for-claude-code"));
+  hooks.SessionStart = [...filtered, SESSION_START_HOOK];
+  return hooks;
+}
+
+async function writeSettings(settingsPath) {
   let existing = {};
   try {
     await fs.mkdir(path.dirname(settingsPath), { recursive: true });
@@ -262,13 +278,13 @@ async function writeSettings(settingsPath, isGlobal) {
 
   const merged = {
     ...existing,
+    hooks: mergeSessionStartHook(existing),
     mcpServers: {
       ...(existing.mcpServers || {}),
       "embedded-editor": MCP_SERVER_ENTRY,
     },
   };
   await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf8");
-  return true;
 }
 
 export async function runInit({ global: isGlobal = false } = {}) {
@@ -280,13 +296,13 @@ export async function runInit({ global: isGlobal = false } = {}) {
   // ── 1. MCP server registration + slash commands ─────────────────────────────
   if (isGlobal) {
     const globalSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
-    await writeSettings(globalSettingsPath, true);
-    console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server registered globally"));
-    console.log(chalk.gray("    Works in every folder; diagrams saved to wherever Claude Code is open."));
+    await writeSettings(globalSettingsPath);
+    console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server + auto-start hook registered globally"));
+    console.log(chalk.gray("    The viewer starts automatically when Claude Code opens."));
     await writeCommands(path.join(os.homedir(), ".claude", "commands"), true);
   } else {
     const localSettingsPath = path.join(CWD, ".claude", "settings.json");
-    await writeSettings(localSettingsPath, false);
+    await writeSettings(localSettingsPath);
     console.log(chalk.green("  ✓ ") + chalk.white(".claude/settings.json") + chalk.gray(" — MCP server registered for this project"));
     await writeCommands(path.join(CWD, ".claude", "commands"), false);
   }
