@@ -390,7 +390,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
           <DropSection label="RECENT">
             {recentShown.map(r => (
               <DropItem key={r.name + r.type} name={r.name} type={r.type}
-                active={active?.name === r.name} sub={timeAgo(r.at)}
+                active={active?.name === r.name} sub={timeAgo(r.at)} title={r.name}
                 onClick={() => { onOpen(r.name, r.type); onClose(); }}
                 onDelete={() => onDelete(r.name, r.type)} />
             ))}
@@ -426,6 +426,15 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
   );
 }
 
+// Show beginning and end of long names so both the type and the unique part
+// are visible. E.g. "Job Specific Re…Sachs.md" instead of "Job Specific Re…"
+function midTruncate(s, max = 26) {
+  if (s.length <= max) return s;
+  const front = Math.ceil((max - 1) * 0.6);
+  const back = max - 1 - front;
+  return s.slice(0, front) + "…" + s.slice(-back);
+}
+
 function DropSection({ label, children }) {
   const T = useT();
   return (
@@ -453,7 +462,7 @@ function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, titl
       }}>
       <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
       <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
-        color: active ? T.text : T.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
+        color: active ? T.text : T.textDim, whiteSpace: "nowrap" }}>{midTruncate(name)}</span>
       {sub && <span style={{ color: T.muted, fontSize: 9, fontFamily: T.mono, flexShrink: 0 }}>{sub}</span>}
       {h && <span onClick={e => { e.stopPropagation(); onDelete(); }}
         style={{ color: T.red, fontSize: 11, lineHeight: 1, flexShrink: 0 }} title="delete">×</span>}
