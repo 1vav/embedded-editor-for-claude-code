@@ -272,7 +272,7 @@ function buildSessionStartHook() {
 
   let serveCmd;
   if (nodeBin && cliJs) {
-    serveCmd = `"${nodeBin}" "${cliJs}" serve`;
+    serveCmd = `"${nodeBin}" "${cliJs}" view`;
   } else if (npxBin) {
     // Fallback: npx with absolute path (slower but works)
     serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code serve`;
