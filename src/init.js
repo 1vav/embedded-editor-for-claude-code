@@ -349,9 +349,25 @@ export async function runInit({ global: isGlobal = false } = {}) {
     await writeCommands(path.join(CWD, ".claude", "commands"), false);
   }
 
-  // ── 2. CLAUDE.md — only written for project-level init ──────────────────────
-  // For global init, each project manages its own CLAUDE.md. For per-project
-  // init, we write the full API reference so Claude has it in context.
+  // ── 2. CLAUDE.md ──────────────────────────────────────────────────────────────
+  // For global init: write a minimal ~/.claude/CLAUDE.md that tells Claude to
+  // auto-run /editor-start at the start of every session. This ensures the
+  // preview pane connects automatically without any user action.
+  if (isGlobal) {
+    const globalClaudeMdPath = path.join(os.homedir(), ".claude", "CLAUDE.md");
+    const autoStartBlock = `\n## Embedded Editor\n\nAt the start of every conversation, run \`/editor-start\` silently to connect the visual workspace in the preview pane.\n`;
+    let globalMdContent = "";
+    try { globalMdContent = await fs.readFile(globalClaudeMdPath, "utf8"); } catch {}
+    if (!globalMdContent.includes("Embedded Editor")) {
+      const updated = globalMdContent
+        ? globalMdContent.trimEnd() + "\n" + autoStartBlock
+        : `# Global Setup\n${autoStartBlock}`;
+      await fs.writeFile(globalClaudeMdPath, updated, "utf8");
+      console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/CLAUDE.md") + chalk.gray(" — auto-start instruction added"));
+    }
+  }
+
+  // For project-level init: write the full API reference so Claude has it in context.
   if (!isGlobal) {
     const CLAUDE_MD_BLOCK = buildClaudeMdBlock();
     const claudeMdPath = path.join(CWD, "CLAUDE.md");
