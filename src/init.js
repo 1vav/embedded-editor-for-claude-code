@@ -190,34 +190,26 @@ allowed-tools: Bash, Write, mcp__Claude_Preview__preview_start
 
 Start the Embedded Editor viewer and open it in the preview pane automatically.
 
-**Step 1.** Resolve the absolute path to the \`embedded-editor\` binary:
+**Step 1.** Get the absolute paths needed. Run both commands:
 
 \`\`\`bash
-which embedded-editor 2>/dev/null || true
+which node
+npm root -g
 \`\`\`
+
+The \`cli.js\` path is: \`<output of npm root -g>/embedded-editor-for-claude-code/bin/cli.js\`
 
 **Step 2.** Ensure \`.claude/launch.json\` contains an entry for the Embedded Editor.
 
 Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" entry in its \`configurations\` array, add one. If the file doesn't exist yet, create it.
 
-Use the absolute path from Step 1 as \`runtimeExecutable\` if found (e.g. \`/Users/vaibha/.nvm/versions/node/v22.22.0/bin/embedded-editor\`). If not found, fall back to \`npx\` with args \`["-y", "embedded-editor-for-claude-code", "serve"]\`.
+Use the absolute path to \`node\` as \`runtimeExecutable\` and the absolute path to \`cli.js\` as the first \`runtimeArg\`. This is required because the preview system runs in a minimal shell without nvm on PATH.
 
-Entry using absolute path (preferred):
 \`\`\`json
 {
   "name": "Embedded Editor",
-  "runtimeExecutable": "/absolute/path/to/embedded-editor",
-  "runtimeArgs": ["serve"],
-  "port": 3000
-}
-\`\`\`
-
-Fallback entry using npx:
-\`\`\`json
-{
-  "name": "Embedded Editor",
-  "runtimeExecutable": "npx",
-  "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+  "runtimeExecutable": "<absolute path to node>",
+  "runtimeArgs": ["<absolute path to cli.js>", "serve"],
   "port": 3000
 }
 \`\`\`
@@ -269,27 +261,29 @@ function resolveBin(name) {
 }
 
 function buildSessionStartHook() {
-  const editorBin = resolveBin("embedded-editor");
-  const npxBin    = resolveBin("npx");
-  // If we have the global binary, use it directly (fast, no npm resolution).
-  // Otherwise fall back to npx. Both are absolute paths so the hook shell
-  // doesn't need nvm/homebrew on its PATH.
+  // The hook shell does not source nvm/homebrew, so PATH-based lookups fail.
+  // We must bake in absolute paths to both `node` and the cli.js entry point.
+  // Using `node /path/to/cli.js` avoids the `#!/usr/bin/env node` shebang
+  // lookup that fails when node is not on the minimal PATH.
+  const nodeBin  = resolveBin("node");
+  const npmRoot  = (() => { try { return execSync("npm root -g", { encoding: "utf8" }).trim(); } catch { return null; } })();
+  const cliJs    = npmRoot ? `${npmRoot}/embedded-editor-for-claude-code/bin/cli.js` : null;
+  const npxBin   = resolveBin("npx");
+
   let serveCmd;
-  if (editorBin) {
-    serveCmd = npxBin
-      ? `"${editorBin}" serve || "${npxBin}" --yes embedded-editor-for-claude-code@latest serve`
-      : `"${editorBin}" serve`;
+  if (nodeBin && cliJs) {
+    serveCmd = `"${nodeBin}" "${cliJs}" serve`;
   } else if (npxBin) {
-    serveCmd = `"${npxBin}" --yes embedded-editor-for-claude-code@latest serve`;
+    // Fallback: npx with absolute path (slower but works)
+    serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code serve`;
   } else {
-    // Last resort: hope one of them is on PATH at hook run time
-    serveCmd = `embedded-editor serve || npx --yes embedded-editor-for-claude-code@latest serve`;
+    serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" serve`;
   }
   return {
     type: "command",
     // Start the viewer server in the background if nothing is on port 3000 yet.
     // Runs silently — output goes to /tmp/embedded-editor.log.
-    command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || { ${serveCmd}; } > /tmp/embedded-editor.log 2>&1 &`,
+    command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
   };
 }
 
