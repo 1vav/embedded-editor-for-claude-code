@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
+import { execSync, execFileSync } from "child_process";
 import os from "os";
 import path from "path";
 import chalk from "chalk";
@@ -254,20 +254,48 @@ async function writeCommands(commandsDir, isGlobal) {
   console.log(chalk.green("  ✓ ") + chalk.white(scope) + chalk.gray(` — slash commands: ${cmds}`));
 }
 
-const SESSION_START_HOOK = {
-  type: "command",
-  // Start the viewer server in the background if nothing is on port 3000 yet.
-  // Uses the globally-installed binary when available (fast), falls back to npx.
-  // Runs silently — output goes to /tmp/embedded-editor.log.
-  command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || (command -v embedded-editor > /dev/null 2>&1 && embedded-editor serve || npx --yes embedded-editor-for-claude-code@latest serve) > /tmp/embedded-editor.log 2>&1 &`,
-};
+// Resolve the absolute path to a binary at init-time.
+// Hooks run in a minimal shell where nvm/homebrew PATH is not set, so we
+// must bake the absolute path in at the time the user runs `init`.
+function resolveBin(name) {
+  try {
+    // `which` works on macOS/Linux; fall back to `where` on Windows
+    const cmd = process.platform === "win32" ? "where" : "which";
+    return execFileSync(cmd, [name], { encoding: "utf8" }).trim().split("\n")[0].trim();
+  } catch { return null; }
+}
+
+function buildSessionStartHook() {
+  const editorBin = resolveBin("embedded-editor");
+  const npxBin    = resolveBin("npx");
+  // If we have the global binary, use it directly (fast, no npm resolution).
+  // Otherwise fall back to npx. Both are absolute paths so the hook shell
+  // doesn't need nvm/homebrew on its PATH.
+  let serveCmd;
+  if (editorBin) {
+    serveCmd = npxBin
+      ? `"${editorBin}" serve || "${npxBin}" --yes embedded-editor-for-claude-code@latest serve`
+      : `"${editorBin}" serve`;
+  } else if (npxBin) {
+    serveCmd = `"${npxBin}" --yes embedded-editor-for-claude-code@latest serve`;
+  } else {
+    // Last resort: hope one of them is on PATH at hook run time
+    serveCmd = `embedded-editor serve || npx --yes embedded-editor-for-claude-code@latest serve`;
+  }
+  return {
+    type: "command",
+    // Start the viewer server in the background if nothing is on port 3000 yet.
+    // Runs silently — output goes to /tmp/embedded-editor.log.
+    command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || { ${serveCmd}; } > /tmp/embedded-editor.log 2>&1 &`,
+  };
+}
 
 function mergeSessionStartHook(existing) {
   const hooks = existing.hooks ? JSON.parse(JSON.stringify(existing.hooks)) : {};
   const starts = hooks.SessionStart || [];
   // Remove any previous embedded-editor hook, then append the current one.
-  const filtered = starts.filter(h => !String(h.command || "").includes("embedded-editor-for-claude-code"));
-  hooks.SessionStart = [...filtered, SESSION_START_HOOK];
+  const filtered = starts.filter(h => !String(h.command || "").includes("embedded-editor"));
+  hooks.SessionStart = [...filtered, buildSessionStartHook()];
   return hooks;
 }
 
