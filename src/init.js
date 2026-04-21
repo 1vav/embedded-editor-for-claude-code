@@ -21,7 +21,7 @@ function getVersion(pkg) {
 
 const MCP_SERVER_ENTRY = {
   command: "npx",
-  args: ["-y", `embedded-editor-for-claude-code@${packageVersion}`, "serve", "--mcp"],
+  args: ["-y", "embedded-editor-for-claude-code@latest", "serve", "--mcp"],
   env: { EXCALIDRAW_ROOT: "." },
 };
 
@@ -260,12 +260,6 @@ async function writeSettings(settingsPath, isGlobal) {
     existing = JSON.parse(await fs.readFile(settingsPath, "utf8"));
   } catch { /* first run */ }
 
-  if (existing.mcpServers?.["embedded-editor"]) {
-    const scope = isGlobal ? "~/.claude/settings.json" : ".claude/settings.json";
-    console.log(chalk.gray(`  ↩ ${scope} already has embedded-editor server, skipped`));
-    return false;
-  }
-
   const merged = {
     ...existing,
     mcpServers: {
@@ -286,18 +280,14 @@ export async function runInit({ global: isGlobal = false } = {}) {
   // ── 1. MCP server registration + slash commands ─────────────────────────────
   if (isGlobal) {
     const globalSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
-    const wrote = await writeSettings(globalSettingsPath, true);
-    if (wrote) {
-      console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server registered globally"));
-      console.log(chalk.gray("    Works in every folder; diagrams saved to wherever Claude Code is open."));
-    }
+    await writeSettings(globalSettingsPath, true);
+    console.log(chalk.green("  ✓ ") + chalk.white("~/.claude/settings.json") + chalk.gray(" — MCP server registered globally"));
+    console.log(chalk.gray("    Works in every folder; diagrams saved to wherever Claude Code is open."));
     await writeCommands(path.join(os.homedir(), ".claude", "commands"), true);
   } else {
     const localSettingsPath = path.join(CWD, ".claude", "settings.json");
-    const wrote = await writeSettings(localSettingsPath, false);
-    if (wrote) {
-      console.log(chalk.green("  ✓ ") + chalk.white(".claude/settings.json") + chalk.gray(" — MCP server registered for this project"));
-    }
+    await writeSettings(localSettingsPath, false);
+    console.log(chalk.green("  ✓ ") + chalk.white(".claude/settings.json") + chalk.gray(" — MCP server registered for this project"));
     await writeCommands(path.join(CWD, ".claude", "commands"), false);
   }
 
