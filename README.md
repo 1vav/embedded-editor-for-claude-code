@@ -20,41 +20,41 @@ All three editors are **live-synced** via SSE — Claude's edits appear in the b
 
 ## Quick start
 
-### Step 1 — Install (terminal required once)
+### Global install (recommended)
 
-**Option A — MCP server via `claude mcp add`** (simplest):
+Registers the MCP server and `/editor-start` · `/editor-stop` slash commands for every project:
 
 ```sh
-claude mcp add --transport stdio embedded-editor -- npx -y embedded-editor-for-claude-code
+npx embedded-editor-for-claude-code init --global
 ```
 
-**Option B — Plugin** (from a Claude Code terminal session):
+Restart Claude Code, then use the slash commands in any project:
 
 ```text
-/plugin install 1vav/embedded-editor-for-claude-code
-```
-
-> **Desktop app users:** installation always requires a terminal step. Run either command above in a terminal, then switch to the desktop app — it picks up the configuration automatically without a restart.
-
-### Step 2 — Use the slash commands
-
-```text
-/editor-start    ← opens the viewer at http://127.0.0.1:3000
+/editor-start    ← starts the viewer and opens it in the preview pane
 /editor-stop     ← shuts it down
 ```
 
-Open the viewer in the preview pane (☁ button in the Claude Code toolbar) or directly in your browser.
+### Per-project install (optional)
 
-### Per-project setup (optional)
-
-Adds a full Excalidraw API reference to `CLAUDE.md` so Claude knows the element schema without being told:
+Adds a full Excalidraw element reference to `CLAUDE.md` so Claude knows the diagram API without being told. Run inside the project you want to set up:
 
 ```sh
 cd your-project
 npx embedded-editor-for-claude-code init
 ```
 
-> Re-run `init` after upgrading to refresh the diagram API reference in `CLAUDE.md`.
+> Re-run `init` after upgrading to refresh the API reference in `CLAUDE.md`.
+
+### Manual MCP registration (alternative)
+
+If you prefer not to use `init`, add the MCP server directly:
+
+```sh
+claude mcp add --transport stdio embedded-editor -- npx -y embedded-editor-for-claude-code
+```
+
+> **Desktop app users:** installation always requires a terminal step. Run any command above in a terminal, then switch to the desktop app — it picks up the configuration automatically without a restart.
 
 ### Ask Claude to draw
 

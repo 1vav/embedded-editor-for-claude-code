@@ -320,10 +320,17 @@ function Ghost({ children, onClick, active, title, danger }) {
 
 function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active, onOpen, onDelete, onClose }) {
   const T = useT();
-  const [q,      setQ]      = useState("");
-  const [filter, setFilter] = useState("all"); // all | drawings | notes | code
+  const [q,            setQ]            = useState("");
+  const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code
+  const [closedFolders, setClosedFolders] = useState(new Set());
   const ref = useRef();
   useClickOutside(ref, onClose);
+
+  const toggleFolder = path => setClosedFolders(prev => {
+    const next = new Set(prev);
+    next.has(path) ? next.delete(path) : next.add(path);
+    return next;
+  });
 
   const allFiles = [
     ...diagrams.map(n => ({ name: n, type: "diagram" })),
@@ -394,12 +401,19 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
         {/* All files */}
         {shown.length > 0 && (
           <DropSection label="FILES">
-            {shown.map(f => (
+            {q ? shown.map(f => (
               <DropItem key={f.name + f.type} name={f.name} type={f.type}
-                active={active?.name === f.name}
+                active={active?.name === f.name} title={f.name}
                 onClick={() => { onOpen(f.name, f.type); onClose(); }}
                 onDelete={() => onDelete(f.name, f.type)} />
-            ))}
+            )) : (
+              <FileTree node={buildFileTree(shown)} depth={0}
+                closedFolders={closedFolders} toggleFolder={toggleFolder}
+                active={active}
+                onOpen={(name, type) => { onOpen(name, type); onClose(); }}
+                onDelete={onDelete}
+                pathPrefix="" />
+            )}
           </DropSection>
         )}
         {shown.length === 0 && recentShown.length === 0 && (
@@ -423,26 +437,89 @@ function DropSection({ label, children }) {
   );
 }
 
-function DropItem({ name, type, active, sub, onClick, onDelete }) {
+function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, title }) {
   const T = useT();
   const [h, sH] = useState(false);
   const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : "¶";
   const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : T.blue;
   return (
-    <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} style={{
-      display: "flex", alignItems: "center", gap: 6, padding: "5px 10px",
-      background: active ? T.surface3 : h ? T.surface2 : "transparent",
-      borderLeft: `2px solid ${active ? T.accent : "transparent"}`,
-      cursor: "pointer", transition: "background .08s",
-    }}>
+    <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      title={title} style={{
+        display: "flex", alignItems: "center", gap: 6,
+        padding: `5px 10px 5px ${10 + indent}px`,
+        background: active ? T.surface3 : h ? T.surface2 : "transparent",
+        borderLeft: `2px solid ${active ? T.accent : "transparent"}`,
+        cursor: "pointer", transition: "background .08s", minWidth: 0,
+      }}>
       <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
-      <span style={{ flex: 1, fontFamily: T.mono, fontSize: 11,
+      <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
         color: active ? T.text : T.textDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
       {sub && <span style={{ color: T.muted, fontSize: 9, fontFamily: T.mono, flexShrink: 0 }}>{sub}</span>}
       {h && <span onClick={e => { e.stopPropagation(); onDelete(); }}
         style={{ color: T.red, fontSize: 11, lineHeight: 1, flexShrink: 0 }} title="delete">×</span>}
     </div>
   );
+}
+
+// ─── File tree ────────────────────────────────────────────────────────────────
+
+function buildFileTree(files) {
+  const root = { files: [], folders: {} };
+  function add(node, file, remaining) {
+    const slash = remaining.indexOf("/");
+    if (slash === -1) {
+      node.files.push({ name: remaining, fullPath: file.name, type: file.type });
+    } else {
+      const folder = remaining.slice(0, slash);
+      const rest = remaining.slice(slash + 1);
+      if (!node.folders[folder]) node.folders[folder] = { files: [], folders: {} };
+      add(node.folders[folder], file, rest);
+    }
+  }
+  for (const f of files) add(root, f, f.name);
+  return root;
+}
+
+function FileTree({ node, depth, closedFolders, toggleFolder, active, onOpen, onDelete, pathPrefix }) {
+  const T = useT();
+  const indent = depth * 12;
+  return <>
+    {Object.keys(node.folders).sort().map(folder => {
+      const fullFolderPath = pathPrefix ? `${pathPrefix}/${folder}` : folder;
+      const isOpen = !closedFolders.has(fullFolderPath);
+      return (
+        <div key={fullFolderPath}>
+          <div onClick={() => toggleFolder(fullFolderPath)} style={{
+            display: "flex", alignItems: "center", gap: 5,
+            padding: `3px 10px 3px ${10 + indent}px`,
+            cursor: "pointer", userSelect: "none",
+          }}>
+            <span style={{
+              fontSize: 7, color: T.muted, flexShrink: 0, lineHeight: 1,
+              display: "inline-block", transition: "transform .12s",
+              transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+            }}>▶</span>
+            <span style={{
+              fontFamily: T.mono, fontSize: 10, color: T.muted, minWidth: 0,
+              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            }}>{folder}/</span>
+          </div>
+          {isOpen && (
+            <FileTree node={node.folders[folder]} depth={depth + 1}
+              closedFolders={closedFolders} toggleFolder={toggleFolder}
+              active={active} onOpen={onOpen} onDelete={onDelete}
+              pathPrefix={fullFolderPath} />
+          )}
+        </div>
+      );
+    })}
+    {node.files.map(f => (
+      <DropItem key={f.fullPath + f.type} name={f.name} type={f.type}
+        active={active?.name === f.fullPath} indent={indent} title={f.fullPath}
+        onClick={() => onOpen(f.fullPath, f.type)}
+        onDelete={() => onDelete(f.fullPath, f.type)} />
+    ))}
+  </>;
 }
 
 // ─── Brand logos ──────────────────────────────────────────────────────────────
