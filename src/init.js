@@ -190,36 +190,39 @@ allowed-tools: Bash, Write, mcp__Claude_Preview__preview_start
 
 Start the Embedded Editor viewer and open it in the preview pane automatically.
 
-**Step 1.** Ensure \`.claude/launch.json\` contains an entry for the Embedded Editor.
+**Step 1.** Resolve the absolute path to the \`embedded-editor\` binary:
 
-Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" entry in its \`configurations\` array, add one. If the file doesn't exist yet, create it. The entry to add:
+\`\`\`bash
+which embedded-editor 2>/dev/null || true
+\`\`\`
 
+**Step 2.** Ensure \`.claude/launch.json\` contains an entry for the Embedded Editor.
+
+Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" entry in its \`configurations\` array, add one. If the file doesn't exist yet, create it.
+
+Use the absolute path from Step 1 as \`runtimeExecutable\` if found (e.g. \`/Users/vaibha/.nvm/versions/node/v22.22.0/bin/embedded-editor\`). If not found, fall back to \`npx\` with args \`["-y", "embedded-editor-for-claude-code", "serve"]\`.
+
+Entry using absolute path (preferred):
 \`\`\`json
 {
   "name": "Embedded Editor",
-  "runtimeExecutable": "embedded-editor",
+  "runtimeExecutable": "/absolute/path/to/embedded-editor",
   "runtimeArgs": ["serve"],
   "port": 3000
 }
 \`\`\`
 
-A minimal new file looks like:
-
+Fallback entry using npx:
 \`\`\`json
 {
-  "version": "0.0.1",
-  "configurations": [
-    {
-      "name": "Embedded Editor",
-      "runtimeExecutable": "embedded-editor",
-      "runtimeArgs": ["serve"],
-      "port": 3000
-    }
-  ]
+  "name": "Embedded Editor",
+  "runtimeExecutable": "npx",
+  "runtimeArgs": ["-y", "embedded-editor-for-claude-code", "serve"],
+  "port": 3000
 }
 \`\`\`
 
-**Step 2.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server and opens the preview pane pointing to http://127.0.0.1:3000 automatically.
+**Step 3.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server and opens the preview pane pointing to http://127.0.0.1:3000 automatically.
 `;
 
 const STOP_COMMAND = `\
