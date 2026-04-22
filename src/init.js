@@ -185,33 +185,41 @@ Run \`npx embedded-editor serve\` → open http://127.0.0.1:${DEFAULT_PORT}
 const START_COMMAND = `\
 ---
 description: Start the Embedded Editor viewer (diagrams · canvases · notes · code)
-allowed-tools: Bash, Write, mcp__Claude_Preview__preview_start
+allowed-tools: Bash, mcp__Claude_Preview__preview_start
 ---
 
-Start the Embedded Editor viewer and open it in the preview pane automatically.
+Start the Embedded Editor viewer and open it in the preview pane.
 
-**Step 1.** Get the absolute paths needed. Run both commands:
+**Step 1.** Check whether this project uses Embedded Editor. Run:
 
 \`\`\`bash
-which node
-npm root -g
+CLI_PATH="$(npm root -g 2>/dev/null)/embedded-editor-for-claude-code/bin/cli.js"
+ls "$CLI_PATH" 2>/dev/null && echo "GLOBAL_INSTALL=yes" || echo "GLOBAL_INSTALL=no"
+grep -il "embedded.editor\\|embedded-editor" CLAUDE.md 2>/dev/null && echo "PROJECT_OPTIN=yes" || echo "PROJECT_OPTIN=no"
 \`\`\`
 
-The \`cli.js\` path is: \`<output of npm root -g>/embedded-editor-for-claude-code/bin/cli.js\`
+If both outputs are "no" — this project does not use Embedded Editor. Stop here silently without modifying any files.
 
-**Step 2.** Ensure \`.claude/launch.json\` contains an entry for the Embedded Editor.
+**Step 2.** Safely update \`.claude/launch.json\` using Node.js. This command surgically adds or updates only the "Embedded Editor" entry — all other entries in the file are preserved exactly as-is:
 
-Read \`.claude/launch.json\` if it exists. If the file has no "Embedded Editor" entry in its \`configurations\` array, add one. If the file doesn't exist yet, create it.
-
-Use the absolute path to \`node\` as \`runtimeExecutable\` and the absolute path to \`cli.js\` as the first \`runtimeArg\`. This is required because the preview system runs in a minimal shell without nvm on PATH.
-
-\`\`\`json
-{
-  "name": "Embedded Editor",
-  "runtimeExecutable": "<absolute path to node>",
-  "runtimeArgs": ["<absolute path to cli.js>", "view"],
-  "port": 3000
+\`\`\`bash
+node -e "
+const fs = require('fs');
+const nodeBin = process.argv[1];
+const cliPath = process.argv[2];
+const file = '.claude/launch.json';
+let config = { version: '0.0.1', configurations: [] };
+if (fs.existsSync(file)) {
+  try { config = JSON.parse(fs.readFileSync(file, 'utf8')); } catch(e) {}
 }
+if (!Array.isArray(config.configurations)) config.configurations = [];
+const entry = { name: 'Embedded Editor', runtimeExecutable: nodeBin, runtimeArgs: [cliPath, 'view'], port: 3000 };
+const idx = config.configurations.findIndex(c => c.name === 'Embedded Editor');
+if (idx >= 0) config.configurations[idx] = entry; else config.configurations.push(entry);
+fs.mkdirSync('.claude', { recursive: true });
+fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\\n');
+console.log(idx >= 0 ? 'Updated Embedded Editor entry' : 'Added Embedded Editor entry');
+" "$(which node)" "$(npm root -g 2>/dev/null)/embedded-editor-for-claude-code/bin/cli.js"
 \`\`\`
 
 **Step 3.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server and opens the preview pane pointing to http://127.0.0.1:3000 automatically.
