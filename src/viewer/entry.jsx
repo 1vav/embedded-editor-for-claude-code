@@ -1858,8 +1858,11 @@ function App() {
   const [notes,       setNotes]       = useState([]);
   const [codeFiles,   setCodeFiles]   = useState([]);
   const [recent,      setRecent]      = useState([]); // [{name, type, at}]
-  const [tabs,      setTabs]      = useState([]); // [{name, type}]
-  const [active,    setActive]    = useState(null);
+  const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem("ee-tabs") ?? "[]"); } catch { return []; } });
+  const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem("ee-active") ?? "null"); } catch { return null; } });
+
+  useEffect(() => { try { localStorage.setItem("ee-tabs", JSON.stringify(tabs)); } catch {} }, [tabs]);
+  useEffect(() => { try { localStorage.setItem("ee-active", JSON.stringify(active)); } catch {} }, [active]);
   const [showHist,  setShowHist]  = useState(false);
   const [showExp,   setShowExp]   = useState(false);
   const [showNew,   setShowNew]   = useState(false);
