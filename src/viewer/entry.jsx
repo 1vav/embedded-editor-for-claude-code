@@ -112,6 +112,9 @@ function makeNoteEditorTheme(T) {
     ".cm-md-h1":       { fontSize: "1.4em", fontWeight: "700" },
     ".cm-md-h2":       { fontSize: "1.15em", fontWeight: "700" },
     ".cm-md-h3":       { fontSize: "1em", fontWeight: "700", opacity: "0.8" },
+    ".cm-md-h1-line":  { paddingTop: "28px", paddingBottom: "6px" },
+    ".cm-md-h2-line":  { paddingTop: "20px", paddingBottom: "5px" },
+    ".cm-md-h3-line":  { paddingTop: "14px", paddingBottom: "4px" },
     ".cm-md-bold":     { fontWeight: "bold" },
     ".cm-md-italic":   { fontStyle: "italic" },
     ".cm-md-strike":   { textDecoration: "line-through" },
@@ -152,6 +155,7 @@ function buildMarkdownDecorations(view) {
   // All marks go into one builder (marks can overlap). HR widget replaces go into a second.
   const markDecs = [];
   const hrDecs = [];
+  const lineDecs = [];
   const vFrom = view.visibleRanges[0]?.from ?? 0;
   const vTo   = view.visibleRanges[view.visibleRanges.length - 1]?.to ?? state.doc.length;
 
@@ -162,10 +166,18 @@ function buildMarkdownDecorations(view) {
       if (onCursorLine(from, to)) return false;
       switch (name) {
         case "FencedCode": case "CodeBlock": case "HTMLBlock": return false;
-        case "ATXHeading1": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h1" }) }); break;
-        case "ATXHeading2": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h2" }) }); break;
+        case "ATXHeading1":
+          markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h1" }) });
+          lineDecs.push({ from: state.doc.lineAt(from).from, dec: Decoration.line({ class: "cm-md-h1-line" }) });
+          break;
+        case "ATXHeading2":
+          markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h2" }) });
+          lineDecs.push({ from: state.doc.lineAt(from).from, dec: Decoration.line({ class: "cm-md-h2-line" }) });
+          break;
         case "ATXHeading3": case "ATXHeading4": case "ATXHeading5": case "ATXHeading6":
-          markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h3" }) }); break;
+          markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h3" }) });
+          lineDecs.push({ from: state.doc.lineAt(from).from, dec: Decoration.line({ class: "cm-md-h3-line" }) });
+          break;
         case "HeaderMark": {
           const extra = state.doc.sliceString(to, to + 1) === " " ? 1 : 0;
           markDecs.push({ from, to: to + extra, dec: HIDDEN }); break;
@@ -205,13 +217,23 @@ function buildMarkdownDecorations(view) {
 
   const mb = new RangeSetBuilder();
   for (const { from, to, dec } of markDecs) mb.add(from, to, dec);
+  const sets = [mb.finish()];
 
-  if (hrDecs.length === 0) return mb.finish();
+  if (hrDecs.length > 0) {
+    hrDecs.sort(byPos);
+    const hb = new RangeSetBuilder();
+    for (const { from, to, dec } of hrDecs) hb.add(from, to, dec);
+    sets.push(hb.finish());
+  }
 
-  hrDecs.sort(byPos);
-  const hb = new RangeSetBuilder();
-  for (const { from, to, dec } of hrDecs) hb.add(from, to, dec);
-  return RangeSet.join([mb.finish(), hb.finish()]);
+  if (lineDecs.length > 0) {
+    lineDecs.sort((a, b) => a.from - b.from);
+    const lb = new RangeSetBuilder();
+    for (const { from, dec } of lineDecs) lb.add(from, from, dec);
+    sets.push(lb.finish());
+  }
+
+  return sets.length === 1 ? sets[0] : RangeSet.join(sets);
 }
 
 const markdownLivePreview = ViewPlugin.fromClass(class {
@@ -1511,10 +1533,10 @@ function CodeEditor({ name, onUserSave }) {
 // CSS for note body content — called with the current theme object
 function makeNoteStyles(T) { return `
   .note-body { color: ${T.text}; font-family: ${T.noteFont}; font-size: 15px; line-height: 1.75; }
-  .note-body h1,.note-body h2,.note-body h3 { font-family: ${T.mono}; color: ${T.text}; margin: 1.5em 0 .5em; font-weight: 700; }
-  .note-body h1 { font-size: 22px; border-bottom: 1px solid ${T.border}; padding-bottom: .4em; }
-  .note-body h2 { font-size: 17px; }
-  .note-body h3 { font-size: 14px; color: ${T.textDim}; }
+  .note-body h1,.note-body h2,.note-body h3 { font-family: ${T.noteFont}; color: ${T.text}; font-weight: 700; }
+  .note-body h1 { font-size: 1.4em; margin: 1.33em 0 .29em; border-bottom: 1px solid ${T.border}; padding-bottom: .4em; }
+  .note-body h2 { font-size: 1.15em; margin: 1.16em 0 .29em; }
+  .note-body h3 { font-size: 1em; margin: .93em 0 .27em; opacity: 0.8; }
   .note-body p { margin: .8em 0; }
   .note-body a[data-wl] { color: ${T.blue}; text-decoration: none; border-bottom: 1px solid ${T.blue}44; cursor: pointer; }
   .note-body a[data-wl]:hover { border-bottom-color: ${T.blue}; }
