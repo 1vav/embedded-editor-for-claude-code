@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo, createPortal } from "react";
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import DOMPurify from "dompurify";
 import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { Tldraw, getSnapshot, loadSnapshot, toRichText, createShapeId } from "@tldraw/tldraw";
@@ -974,9 +975,10 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
 
   return (
     <div style={{ flex: 1, display: "flex" }}>
+      {/* Image drag-drop is handled natively by Excalidraw; files are persisted via onChange → doSave */}
       <Excalidraw key={name}
         theme={T.excalidraw}
-        initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files }}
+        initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files ?? {} }}
         onChange={debouncedSave}
         onLinkOpen={handleLinkOpen} />
     </div>
@@ -1044,6 +1046,10 @@ function TldrawEditor({ name, onUserSave }) {
 
   return (
     <div style={{ flex: 1, position: "relative" }}>
+      {/* Image drag-drop handled natively by tldraw; assets persisted via store.listen → getSnapshot → saveTldraw */}
+      {/* Known limitation: images are stored as dataURLs inside the tldraw snapshot JSON. Large images (≳3–4 MB
+          decoded) may push the snapshot over the server's 5 MB readBody limit and be rejected. No workaround
+          without raising the limit in src/viewer-server.js readBody(). */}
       <Tldraw
         key={name}
         onMount={handleMount}
@@ -1101,6 +1107,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [mode,    setMode]    = useState("preview");
   const [blinks,  setBlinks]  = useState([]);
   const [showBL,  setShowBL]  = useState(false);
+  const [dropPopup, setDropPopup] = useState(null); // { file, x, y, pos }
   const scrollRef      = useRef(null);  // preview scroll div
   const cmContainerRef = useRef(null);  // CM6 mount point
   const cmViewRef      = useRef(null);  // CM6 EditorView instance
@@ -1141,6 +1148,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const debouncedSaveRef = useRef(debouncedSave);
   useEffect(() => { debouncedSaveRef.current = debouncedSave; }, [debouncedSave]);
 
+  // Stable ref so the CM6 domEventHandlers closure can reach React state without stale captures
+  const setDropPopupRef = useRef(setDropPopup);
+
   // Mount / destroy CM6 note editor when in edit mode
   useEffect(() => {
     if (mode !== "edit" || loading || !cmContainerRef.current) return;
@@ -1160,6 +1170,23 @@ function NoteView({ name, onNavigate, onUserSave }) {
             const newText = update.state.doc.toString();
             setRaw(newText);
             debouncedSaveRef.current(newText);
+          }),
+          // Handle image file drops inside CM6 so it keeps its own drag-cursor behaviour.
+          // dragover: set dropEffect but don't return true — CM6 continues and shows its cursor.
+          // drop: intercept only image files; return true to suppress CM6's text-insert behaviour.
+          EditorView.domEventHandlers({
+            dragover(e) {
+              if ([...(e.dataTransfer?.types ?? [])].includes("Files"))
+                e.dataTransfer.dropEffect = "copy";
+            },
+            drop(e, view) {
+              const file = [...(e.dataTransfer?.files ?? [])].find(f => f.type.startsWith("image/"));
+              if (!file) return false;
+              e.preventDefault();
+              const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
+              setDropPopupRef.current({ file, x: e.clientX, y: e.clientY, pos });
+              return true;
+            },
           }),
         ],
       }),
@@ -1208,6 +1235,33 @@ function NoteView({ name, onNavigate, onUserSave }) {
     const wl = e.target.closest("[data-wl]");
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
+
+  const handleDropChoice = useCallback(async (choice) => {
+    if (!dropPopup || !cmViewRef.current) return;
+    const { file, pos } = dropPopup;
+    setDropPopup(null);
+    const view = cmViewRef.current;
+    let mdSnippet;
+    if (choice === "copy") {
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(",")[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch("/api/asset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, data: base64 }),
+      });
+      if (!resp.ok) { console.error("asset upload failed", await resp.text()); return; }
+      const { path } = await resp.json();
+      mdSnippet = `![${file.name}](${path})`;
+    } else {
+      mdSnippet = `![${file.name}](${file.name})`;
+    }
+    view.dispatch({ changes: { from: pos, insert: mdSnippet + "\n" } });
+  }, [dropPopup]);
 
   const segs       = useMemo(() => parseSegments(raw), [raw]);
   const noteStyles = useMemo(() => makeNoteStyles(T), [T]);
@@ -1269,6 +1323,36 @@ function NoteView({ name, onNavigate, onUserSave }) {
           </div>
         )}
       </div>
+
+      {dropPopup && createPortal(
+        <div style={{
+          position: "fixed", left: dropPopup.x, top: dropPopup.y, zIndex: 9999,
+          background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6,
+          boxShadow: "0 4px 16px rgba(0,0,0,.4)", padding: "10px 14px",
+          fontFamily: T.mono, fontSize: 12, color: T.fg,
+          display: "flex", flexDirection: "column", gap: 6, minWidth: 180,
+        }}>
+          <div style={{ color: T.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Drop "{dropPopup.file.name}"
+          </div>
+          <button onClick={() => handleDropChoice("copy")}
+            style={{ background: T.accent, color: "#fff", border: "none", borderRadius: 4,
+              padding: "4px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 12, textAlign: "left" }}>
+            Copy to workspace
+          </button>
+          <button onClick={() => handleDropChoice("link")}
+            style={{ background: "transparent", color: T.fg, border: `1px solid ${T.border}`,
+              borderRadius: 4, padding: "4px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 12, textAlign: "left" }}>
+            Link in place
+          </button>
+          <button onClick={() => setDropPopup(null)}
+            style={{ background: "transparent", color: T.muted, border: "none",
+              cursor: "pointer", fontFamily: T.mono, fontSize: 11, textAlign: "right", padding: "2px 0 0" }}>
+            cancel
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

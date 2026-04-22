@@ -19,6 +19,7 @@
 //   POST /api/restore/:name/:ts      restore snapshot
 //   GET  /api/backlinks/:name        who links here
 //   POST /api/rename                 rename + rewrite all links
+//   POST /api/asset                   upload image into assets/ folder
 //   GET  /vendor/*                   static assets
 
 import http  from "http";
@@ -248,7 +249,8 @@ async function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let total = 0;
-    const MAX = 5 * 1024 * 1024; // #013: 5 MB (was 50 MB)
+    const MAX = 5 * 1024 * 1024; // #013: 5 MB (was 50 MB). Note: tldraw snapshots embed images as dataURLs,
+    // so large dragged-in images can push tldraw saves close to or over this limit.
     req.on("data", c => {
       total += c.length;
       if (total > MAX) { req.destroy(); return reject(new Error("request body too large")); }
@@ -680,6 +682,20 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           broadcast(evType, { name: to, op: "renamed", from: safFrom });
           return json(res, { ok: true, updated });
         } catch (e) { return json(res, { error: e.message }, 500); }
+      }
+
+      // ── Asset upload
+      if (pathname === "/api/asset" && method === "POST") {
+        let body;
+        try { body = await readBody(req); } catch { return json(res, { error: "bad request" }, 400); }
+        const { name, data } = body ?? {};
+        if (!name || !data) return json(res, { error: "missing name or data" }, 400);
+        let safeAssetName;
+        try { safeAssetName = validateName(name); } catch { return json(res, { error: "invalid filename" }, 400); }
+        const assetsDir = path.join(CWD, "assets");
+        await fs.mkdir(assetsDir, { recursive: true });
+        await fs.writeFile(path.join(assetsDir, safeAssetName), Buffer.from(data, "base64"));
+        return json(res, { path: "assets/" + safeAssetName });
       }
 
       // ── Code files list
