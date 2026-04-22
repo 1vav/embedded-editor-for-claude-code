@@ -974,9 +974,10 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
 
   return (
     <div style={{ flex: 1, display: "flex" }}>
+      {/* Image drag-drop is handled natively by Excalidraw; files are persisted via onChange → doSave */}
       <Excalidraw key={name}
         theme={T.excalidraw}
-        initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files }}
+        initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files ?? {} }}
         onChange={debouncedSave}
         onLinkOpen={handleLinkOpen} />
     </div>
