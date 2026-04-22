@@ -2,6 +2,9 @@
 
 An embedded visual workspace for Claude Code — edit Excalidraw diagrams, tldraw canvases, and Markdown notes in the browser preview pane, all linked together with `[[wikilinks]]`.
 
+![ee.png](assets/ee.png)
+
+
 Claude also gets **six MCP tools** to create and edit Excalidraw diagrams inline, with authentic PNG previews rendered by Excalidraw's own pipeline and returned directly in the chat.
 
 ---
@@ -42,6 +45,12 @@ Adds a full Excalidraw element reference to `CLAUDE.md` so Claude knows the diag
 ```sh
 cd your-project
 npx embedded-editor-for-claude-code init
+```
+
+### Update to latest version
+
+```sh
+npm update -g embedded-editor-for-claude-code
 ```
 
 > Re-run `init` after upgrading to refresh the API reference in `CLAUDE.md`.
