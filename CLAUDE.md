@@ -79,6 +79,42 @@ Reliable restart sequence:
 
 If `preview_start` reports the server is already running (`reused: true`), it's healthy — skip step 1.
 
+## Dev Workflow: Making SPA Edits Visible
+
+Two gotchas that will silently hide your `src/viewer/entry.jsx` changes:
+
+**1. `.claude/launch.json` must point to the local `bin/cli.js`, not the global install.**
+
+The `editor-start` skill writes the global path by default (so end-users get `/editor-start` working immediately). When developing the package, fix it:
+
+```json
+"runtimeArgs": ["/Users/vaibha/Downloads/git/embedded_editor_for_claude_code/bin/cli.js", "view"]
+```
+
+If the wrong path is set, edits to `src/viewer/entry.jsx` are ignored — the globally installed `vendor/viewer.js` is served instead. Verify by curling the live server and grepping for a newly added CSS class name.
+
+**2. The browser caches `vendor/viewer.js` for one year (`Cache-Control: immutable`).**
+
+Cache busting is tied to `PACKAGE_VERSION` (the `?v=X.Y.Z` query string on the script tag). If the version doesn't change between rebuilds, the browser serves the cached bundle even after a server restart.
+
+Fix: temporarily add a `-dev` suffix to the version in `package.json` before rebuilding:
+
+```sh
+# bump to bust cache
+node -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=p.version.replace(/-dev$/,'')+'-dev';fs.writeFileSync('package.json',JSON.stringify(p,null,2)+'\n');console.log(p.version)"
+
+npm run build:viewer
+lsof -ti:3000 | xargs kill -9 2>/dev/null; sleep 1
+# then preview_start
+```
+
+Verify the new bundle is live:
+```sh
+curl -s --compressed http://127.0.0.1:3000/vendor/viewer.js | grep -c "your-new-class-name"
+```
+
+Revert the version suffix before releasing.
+
 ## Testing
 
 ```sh
