@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import DOMPurify from "dompurify";
-import { createRoot, createPortal } from "react-dom/client";
+import { createRoot } from "react-dom/client";
+import { createPortal } from "react-dom";
 import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { Tldraw, getSnapshot, loadSnapshot, toRichText, createShapeId } from "@tldraw/tldraw";
