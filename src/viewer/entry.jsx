@@ -1045,6 +1045,10 @@ function TldrawEditor({ name, onUserSave }) {
 
   return (
     <div style={{ flex: 1, position: "relative" }}>
+      {/* Image drag-drop handled natively by tldraw; assets persisted via store.listen → getSnapshot → saveTldraw */}
+      {/* Known limitation: images are stored as dataURLs inside the tldraw snapshot JSON. Large images (≳3–4 MB
+          decoded) may push the snapshot over the server's 5 MB readBody limit and be rejected. No workaround
+          without raising the limit in src/viewer-server.js readBody(). */}
       <Tldraw
         key={name}
         onMount={handleMount}
@@ -1102,6 +1106,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [mode,    setMode]    = useState("preview");
   const [blinks,  setBlinks]  = useState([]);
   const [showBL,  setShowBL]  = useState(false);
+  const [dropPopup, setDropPopup] = useState(null); // { file, x, y, pos }
   const scrollRef      = useRef(null);  // preview scroll div
   const cmContainerRef = useRef(null);  // CM6 mount point
   const cmViewRef      = useRef(null);  // CM6 EditorView instance
@@ -1210,6 +1215,41 @@ function NoteView({ name, onNavigate, onUserSave }) {
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
 
+  const handleImageDrop = useCallback((e) => {
+    e.preventDefault();
+    const file = [...(e.dataTransfer?.files ?? [])].find(f => f.type.startsWith("image/"));
+    if (!file || !cmViewRef.current) return;
+    const pos = cmViewRef.current.posAtCoords({ x: e.clientX, y: e.clientY }) ?? cmViewRef.current.state.doc.length;
+    setDropPopup({ file, x: e.clientX, y: e.clientY, pos });
+  }, []);
+
+  const handleDropChoice = useCallback(async (choice) => {
+    if (!dropPopup || !cmViewRef.current) return;
+    const { file, pos } = dropPopup;
+    setDropPopup(null);
+    const view = cmViewRef.current;
+    let mdSnippet;
+    if (choice === "copy") {
+      const base64 = await new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload = () => res(reader.result.split(",")[1]);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+      });
+      const resp = await fetch("/api/asset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, data: base64 }),
+      });
+      if (!resp.ok) { console.error("asset upload failed", await resp.text()); return; }
+      const { path } = await resp.json();
+      mdSnippet = `![${file.name}](${path})`;
+    } else {
+      mdSnippet = `![${file.name}](${file.name})`;
+    }
+    view.dispatch({ changes: { from: pos, insert: mdSnippet + "\n" } });
+  }, [dropPopup]);
+
   const segs       = useMemo(() => parseSegments(raw), [raw]);
   const noteStyles = useMemo(() => makeNoteStyles(T), [T]);
 
@@ -1236,7 +1276,12 @@ function NoteView({ name, onNavigate, onUserSave }) {
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {/* Main content */}
         {mode === "edit" ? (
-          <div ref={cmContainerRef} style={{ flex: 1, overflow: "hidden" }} />
+          <div
+            ref={cmContainerRef}
+            style={{ flex: 1, overflow: "hidden", position: "relative" }}
+            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+            onDrop={handleImageDrop}
+          />
         ) : (
           <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
@@ -1270,6 +1315,36 @@ function NoteView({ name, onNavigate, onUserSave }) {
           </div>
         )}
       </div>
+
+      {dropPopup && createPortal(
+        <div style={{
+          position: "fixed", left: dropPopup.x, top: dropPopup.y, zIndex: 9999,
+          background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6,
+          boxShadow: "0 4px 16px rgba(0,0,0,.4)", padding: "10px 14px",
+          fontFamily: T.mono, fontSize: 12, color: T.fg,
+          display: "flex", flexDirection: "column", gap: 6, minWidth: 180,
+        }}>
+          <div style={{ color: T.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            Drop "{dropPopup.file.name}"
+          </div>
+          <button onClick={() => handleDropChoice("copy")}
+            style={{ background: T.accent, color: "#fff", border: "none", borderRadius: 4,
+              padding: "4px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 12, textAlign: "left" }}>
+            Copy to workspace
+          </button>
+          <button onClick={() => handleDropChoice("link")}
+            style={{ background: "transparent", color: T.fg, border: `1px solid ${T.border}`,
+              borderRadius: 4, padding: "4px 10px", cursor: "pointer", fontFamily: T.mono, fontSize: 12, textAlign: "left" }}>
+            Link in place
+          </button>
+          <button onClick={() => setDropPopup(null)}
+            style={{ background: "transparent", color: T.muted, border: "none",
+              cursor: "pointer", fontFamily: T.mono, fontSize: 11, textAlign: "right", padding: "2px 0 0" }}>
+            cancel
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
