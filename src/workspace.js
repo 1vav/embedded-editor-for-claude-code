@@ -26,7 +26,7 @@ export function validateName(raw, stripExt = "") {
   const segs = s.split("/").filter(Boolean);
   for (const seg of segs) {
     if (seg === ".." || seg === ".") throw new Error("name may not contain '..' or '.'");
-    if (!/^[\w\-][\w.\- ]*$/.test(seg)) throw new Error(`invalid segment: "${seg}"`);
+    if (!/^[\w-][\w.\- ]*$/.test(seg)) throw new Error(`invalid segment: "${seg}"`);
   }
   return segs.join("/");
 }

@@ -8,7 +8,7 @@ import { DEFAULT_PORT } from "./paths.js";
 
 const CWD = process.cwd();
 
-const packageVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const _packageVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 // Read installed package versions for the version stamp.
 // Some packages block `require('pkg/package.json')` via exports map,
