@@ -209,7 +209,7 @@ Use the absolute path to \`node\` as \`runtimeExecutable\` and the absolute path
 {
   "name": "Embedded Editor",
   "runtimeExecutable": "<absolute path to node>",
-  "runtimeArgs": ["<absolute path to cli.js>", "serve"],
+  "runtimeArgs": ["<absolute path to cli.js>", "view"],
   "port": 3000
 }
 \`\`\`
