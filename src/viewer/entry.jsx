@@ -1125,12 +1125,12 @@ function NoteView({ name, onNavigate, onUserSave }) {
     return () => { cancelled = true; };
   }, [name]);
 
-  // Restore preview scroll after content loads
+  // Restore preview scroll after content loads or when switching back to preview
   useLayoutEffect(() => {
     if (!loading && scrollRef.current && mode === "preview") {
       scrollRef.current.scrollTop = noteScrollCache.get(`${name}:preview`) ?? 0;
     }
-  }, [name, loading]);
+  }, [name, loading, mode]);
 
   // Save preview scroll on unmount
   useEffect(() => {
@@ -1193,6 +1193,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
       parent: cmContainerRef.current,
     });
     cmViewRef.current = view;
+    const cached = noteScrollCache.get(`${name}:edit`) ?? 0;
+    if (cached > 0) requestAnimationFrame(() => { view.scrollDOM.scrollTop = cached; });
     return () => { view.destroy(); cmViewRef.current = null; };
   }, [mode, loading, name]); // `raw` intentionally omitted — captured once at mount
 
@@ -1206,6 +1208,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
     if (newMode === mode) return;
     if (mode === "preview" && scrollRef.current) {
       noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
+    }
+    if (mode === "edit" && cmViewRef.current) {
+      noteScrollCache.set(`${name}:edit`, cmViewRef.current.scrollDOM.scrollTop);
     }
     setMode(newMode);
   }, [mode, name]);
@@ -1333,7 +1338,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
           display: "flex", flexDirection: "column", gap: 6, minWidth: 180,
         }}>
           <div style={{ color: T.muted, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            Drop "{dropPopup.file.name}"
+            Drop &quot;{dropPopup.file.name}&quot;
           </div>
           <button onClick={() => handleDropChoice("copy")}
             style={{ background: T.accent, color: "#fff", border: "none", borderRadius: 4,
