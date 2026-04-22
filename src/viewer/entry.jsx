@@ -1148,6 +1148,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const debouncedSaveRef = useRef(debouncedSave);
   useEffect(() => { debouncedSaveRef.current = debouncedSave; }, [debouncedSave]);
 
+  // Stable ref so the CM6 domEventHandlers closure can reach React state without stale captures
+  const setDropPopupRef = useRef(setDropPopup);
+
   // Mount / destroy CM6 note editor when in edit mode
   useEffect(() => {
     if (mode !== "edit" || loading || !cmContainerRef.current) return;
@@ -1167,6 +1170,23 @@ function NoteView({ name, onNavigate, onUserSave }) {
             const newText = update.state.doc.toString();
             setRaw(newText);
             debouncedSaveRef.current(newText);
+          }),
+          // Handle image file drops inside CM6 so it keeps its own drag-cursor behaviour.
+          // dragover: set dropEffect but don't return true — CM6 continues and shows its cursor.
+          // drop: intercept only image files; return true to suppress CM6's text-insert behaviour.
+          EditorView.domEventHandlers({
+            dragover(e) {
+              if ([...(e.dataTransfer?.types ?? [])].includes("Files"))
+                e.dataTransfer.dropEffect = "copy";
+            },
+            drop(e, view) {
+              const file = [...(e.dataTransfer?.files ?? [])].find(f => f.type.startsWith("image/"));
+              if (!file) return false;
+              e.preventDefault();
+              const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
+              setDropPopupRef.current({ file, x: e.clientX, y: e.clientY, pos });
+              return true;
+            },
           }),
         ],
       }),
@@ -1215,14 +1235,6 @@ function NoteView({ name, onNavigate, onUserSave }) {
     const wl = e.target.closest("[data-wl]");
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
-
-  const handleImageDrop = useCallback((e) => {
-    e.preventDefault();
-    const file = [...(e.dataTransfer?.files ?? [])].find(f => f.type.startsWith("image/"));
-    if (!file || !cmViewRef.current) return;
-    const pos = cmViewRef.current.posAtCoords({ x: e.clientX, y: e.clientY }) ?? cmViewRef.current.state.doc.length;
-    setDropPopup({ file, x: e.clientX, y: e.clientY, pos });
-  }, []);
 
   const handleDropChoice = useCallback(async (choice) => {
     if (!dropPopup || !cmViewRef.current) return;
@@ -1277,12 +1289,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {/* Main content */}
         {mode === "edit" ? (
-          <div
-            ref={cmContainerRef}
-            style={{ flex: 1, overflow: "hidden", position: "relative" }}
-            onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-            onDrop={handleImageDrop}
-          />
+          <div ref={cmContainerRef} style={{ flex: 1, overflow: "hidden" }} />
         ) : (
           <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
