@@ -1125,17 +1125,18 @@ function NoteView({ name, onNavigate, onUserSave }) {
     return () => { cancelled = true; };
   }, [name]);
 
-  // Restore preview scroll after content loads or when switching back to preview
+  // Restore preview scroll after content loads
   useLayoutEffect(() => {
-    if (!loading && scrollRef.current && mode === "preview") {
+    if (!loading && scrollRef.current) {
       scrollRef.current.scrollTop = noteScrollCache.get(`${name}:preview`) ?? 0;
     }
-  }, [name, loading, mode]);
+  }, [name, loading]);
 
-  // Save preview scroll on unmount
+  // Save both scroll positions on unmount
   useEffect(() => {
     return () => {
       if (scrollRef.current) noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
+      if (cmViewRef.current) noteScrollCache.set(`${name}:edit`, cmViewRef.current.scrollDOM.scrollTop);
     };
   }, [name]);
 
@@ -1151,9 +1152,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
   // Stable ref so the CM6 domEventHandlers closure can reach React state without stale captures
   const setDropPopupRef = useRef(setDropPopup);
 
-  // Mount / destroy CM6 note editor when in edit mode
+  // Mount CM6 note editor once per note load; keep it alive across mode switches (hidden in preview)
   useEffect(() => {
-    if (mode !== "edit" || loading || !cmContainerRef.current) return;
+    if (loading || !cmContainerRef.current) return;
     const view = new EditorView({
       state: EditorState.create({
         doc: raw,  // capture initial content at mount time
@@ -1193,10 +1194,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
       parent: cmContainerRef.current,
     });
     cmViewRef.current = view;
-    const cached = noteScrollCache.get(`${name}:edit`) ?? 0;
-    if (cached > 0) requestAnimationFrame(() => { view.scrollDOM.scrollTop = cached; });
+    view.scrollDOM.scrollTop = noteScrollCache.get(`${name}:edit`) ?? 0;
     return () => { view.destroy(); cmViewRef.current = null; };
-  }, [mode, loading, name]); // `raw` intentionally omitted — captured once at mount
+  }, [loading, name]); // `raw` and `mode` intentionally omitted — captured once at mount
 
   // Live-update note editor theme without recreating
   useEffect(() => {
@@ -1206,11 +1206,33 @@ function NoteView({ name, onNavigate, onUserSave }) {
 
   const switchMode = useCallback((newMode) => {
     if (newMode === mode) return;
+    // Save current scroll + percentage. Both panes always have layout (visibility, not display:none)
+    // so scrollHeight is always correct and scrollTop can be set even on the inactive pane.
     if (mode === "preview" && scrollRef.current) {
-      noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
+      const el = scrollRef.current;
+      noteScrollCache.set(`${name}:preview`, el.scrollTop);
+      const max = el.scrollHeight - el.clientHeight;
+      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
     }
     if (mode === "edit" && cmViewRef.current) {
-      noteScrollCache.set(`${name}:edit`, cmViewRef.current.scrollDOM.scrollTop);
+      const el = cmViewRef.current.scrollDOM;
+      noteScrollCache.set(`${name}:edit`, el.scrollTop);
+      const max = el.scrollHeight - el.clientHeight;
+      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
+    }
+    // Restore target scroll synchronously before visibility flips — no rAF needed
+    const pct = noteScrollCache.get(`${name}:pct`);
+    if (newMode === "preview" && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = pct != null
+        ? Math.round(pct * Math.max(0, el.scrollHeight - el.clientHeight))
+        : (noteScrollCache.get(`${name}:preview`) ?? 0);
+    }
+    if (newMode === "edit" && cmViewRef.current) {
+      const el = cmViewRef.current.scrollDOM;
+      el.scrollTop = pct != null
+        ? Math.round(pct * Math.max(0, el.scrollHeight - el.clientHeight))
+        : (noteScrollCache.get(`${name}:edit`) ?? 0);
     }
     setMode(newMode);
   }, [mode, name]);
@@ -1292,11 +1314,20 @@ function NoteView({ name, onNavigate, onUserSave }) {
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        {/* Main content */}
-        {mode === "edit" ? (
-          <div ref={cmContainerRef} style={{ flex: 1, overflow: "hidden" }} />
-        ) : (
-          <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
+        {/* Relative wrapper so both panes can be absolutely stacked.
+            visibility:hidden (not display:none) keeps layout intact so scrollHeight
+            and scrollTop work correctly even when the pane is not active. */}
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <div ref={cmContainerRef} style={{
+            position: "absolute", inset: 0, overflow: "hidden",
+            visibility: mode === "edit" ? "visible" : "hidden",
+            pointerEvents: mode === "edit" ? "auto" : "none",
+          }} />
+          <div ref={scrollRef} style={{
+            position: "absolute", inset: 0, overflow: "auto",
+            visibility: mode === "preview" ? "visible" : "hidden",
+            pointerEvents: mode === "preview" ? "auto" : "none",
+          }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
               {segs.map((seg) =>
@@ -1306,7 +1337,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
               )}
             </div>
           </div>
-        )}
+        </div>
 
         {/* Backlinks panel */}
         {showBL && (
