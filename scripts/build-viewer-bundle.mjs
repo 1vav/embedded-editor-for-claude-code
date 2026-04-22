@@ -18,6 +18,8 @@ import { createGzip, createBrotliCompress, constants as zlibConstants } from "zl
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+const noCompress = process.argv.includes("--no-compress");
+
 console.log("Building viewer bundle…");
 const t0 = Date.now();
 
@@ -50,6 +52,8 @@ await build({
 });
 
 console.log(`Bundle done in ${((Date.now() - t0) / 1000).toFixed(1)}s  →  vendor/viewer.js + vendor/viewer.css`);
+
+if (noCompress) process.exit(0);
 
 // ── Pre-compress JS and CSS for Content-Encoding serving ─────────────────────
 // Produces vendor/viewer.js.gz, vendor/viewer.js.br, vendor/viewer.css.gz, vendor/viewer.css.br

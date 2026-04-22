@@ -7,10 +7,26 @@ Thanks for your interest in contributing!
 ```sh
 git clone https://github.com/1vav/embedded-editor-for-claude-code.git
 cd embedded-editor-for-claude-code
-npm install
+npm install            # also installs git hooks automatically via husky
 npm run build          # generate vendor/ bundles (required before running)
 node bin/cli.js view   # start the viewer at http://127.0.0.1:3000
 ```
+
+## Pre-commit Checks
+
+`npm install` sets up a git pre-commit hook automatically (via [husky](https://typicode.github.io/husky/)). On every commit it runs:
+
+1. **ESLint** (`lint-staged`) — lints only the staged `.js`/`.jsx` files; errors block the commit, warnings are informative
+2. **Fast build** (`npm run build:viewer:fast`) — runs esbuild on `src/viewer/entry.jsx` without compression; catches JSX/import errors before they reach the branch
+
+You can also run these manually:
+
+```sh
+npm run lint              # lint everything in src/, bin/, scripts/
+npm run build:viewer:fast # fast build without .gz/.br compression (~1.5s)
+```
+
+> **Note for end users:** this hook only activates for contributors who *clone* the repo. Installing the package as a dependency (`npm install embedded-editor-for-claude-code`) does **not** install the hooks — npm only runs `prepare` at the project root.
 
 ## Project Structure
 
@@ -52,7 +68,7 @@ Verifies: MCP initialize handshake, all tools registered correctly, PNG renderin
 
 - **Branch:** create a feature branch off `main` (`feat/my-thing`, `fix/my-bug`)
 - **Commits:** use [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `chore:`)
-- **Before opening a PR:** run `npm run build` and `node scripts/smoke-stdio.mjs`
+- **Before opening a PR:** run `npm run lint`, `npm run build`, and `node scripts/smoke-stdio.mjs`
 - **Vendor files:** if you changed `src/viewer/entry.jsx`, include the rebuilt `vendor/viewer.js` and `vendor/viewer.css` in your PR
 
 ## Security

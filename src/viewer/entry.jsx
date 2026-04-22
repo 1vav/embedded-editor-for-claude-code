@@ -1574,7 +1574,7 @@ function ExportModal({ name, onClose }) {
     <Modal title={`EXPORT · ${name}`} onClose={onClose}>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {[["SVG","vector · scalable",T.blue,api.svgUrl(name),`${name}.svg`],
-          ["PNG","raster · 2×",T.accent,api.pngUrl(name),`${name}.png`]].map(([l,s,c,u,f]) => {
+          ["PNG","raster · 2×",T.accent,api.pngUrl(name),`${name}.png`]].map(([l,s,_c,u,f]) => {
           return (
             <div key={l} onClick={() => dl(u,f)}
               style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
