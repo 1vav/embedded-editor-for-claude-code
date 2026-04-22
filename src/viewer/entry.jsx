@@ -9,13 +9,14 @@ import MarkdownIt from "markdown-it";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
-import { EditorView, lineNumbers, highlightActiveLine, keymap } from "@codemirror/view";
-import { EditorState, Compartment } from "@codemirror/state";
+import { EditorView, ViewPlugin, Decoration, WidgetType, lineNumbers, highlightActiveLine, keymap } from "@codemirror/view";
+import { EditorState, Compartment, RangeSetBuilder, RangeSet } from "@codemirror/state";
 import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
-import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
+import { syntaxHighlighting, defaultHighlightStyle, syntaxTree, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { searchKeymap } from "@codemirror/search";
 // Bundled languages (always in main chunk)
+import { markdown } from "@codemirror/lang-markdown";
 import { javascript } from "@codemirror/lang-javascript";
 import { python }     from "@codemirror/lang-python";
 import { json as jsonLang } from "@codemirror/lang-json";
@@ -91,6 +92,140 @@ function makeEditorTheme(T) {
     ".cm-tooltip-autocomplete ul li[aria-selected]": { background: T.surface3 },
   }, { dark: T.isDark });
 }
+
+function makeNoteEditorTheme(T) {
+  return EditorView.theme({
+    "&":            { height: "100%", background: T.surface, color: T.text },
+    ".cm-scroller": { fontFamily: T.noteFont, fontSize: "15px", lineHeight: "1.75", overflow: "auto" },
+    ".cm-content":  { caretColor: T.accent, padding: "28px 32px 60px", maxWidth: "720px", margin: "0 auto", boxSizing: "content-box", fontFamily: T.noteFont },
+    ".cm-line":     { padding: "0" },
+    ".cm-activeLine":   { background: T.surface2 + "40" },
+    ".cm-selectionBackground, ::selection": { background: T.accent + "30 !important" },
+    ".cm-cursor":   { borderLeftColor: T.accent },
+    ".cm-focused":  { outline: "none" },
+    ".cm-panels":   { background: T.surface, borderTop: `1px solid ${T.border}` },
+    ".cm-panels input":  { background: T.surface2, border: `1px solid ${T.border2}`, color: T.text, borderRadius: 4, padding: "2px 6px", fontFamily: T.mono, fontSize: 11 },
+    ".cm-panels button": { background: T.surface3, border: `1px solid ${T.border2}`, color: T.textDim, borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 11 },
+    // Live preview decoration styles
+    ".cm-md-hidden":   { fontSize: "0", lineHeight: "0" },
+    ".cm-md-h1":       { fontSize: "1.4em", fontWeight: "700" },
+    ".cm-md-h2":       { fontSize: "1.15em", fontWeight: "700" },
+    ".cm-md-h3":       { fontSize: "1em", fontWeight: "700", opacity: "0.8" },
+    ".cm-md-bold":     { fontWeight: "bold" },
+    ".cm-md-italic":   { fontStyle: "italic" },
+    ".cm-md-strike":   { textDecoration: "line-through" },
+    ".cm-md-code":     { fontFamily: T.mono, background: T.surface2 + "aa", borderRadius: "3px", padding: "0 3px", fontSize: "0.88em" },
+    ".cm-md-link":     { color: T.blue },
+    ".cm-md-wikilink": { color: T.blue, cursor: "pointer" },
+    ".cm-md-hr":       { display: "block", borderTop: `1px solid ${T.border}`, margin: "0.5em 0", height: "0", width: "100%" },
+  }, { dark: T.isDark });
+}
+
+// ─── CM6 Markdown Live Preview ────────────────────────────────────────────────
+
+class HRWidget extends WidgetType {
+  toDOM() {
+    const d = document.createElement("div");
+    d.className = "cm-md-hr";
+    d.setAttribute("aria-hidden", "true");
+    return d;
+  }
+  eq() { return true; }
+  ignoreEvent() { return true; }
+}
+const HR_WIDGET = new HRWidget();
+
+const HIDDEN = Decoration.mark({ class: "cm-md-hidden" });
+
+function buildMarkdownDecorations(view) {
+  const { state } = view;
+  const cursorHead = state.selection.main.head;
+  const cursorLine = state.doc.lineAt(cursorHead).number;
+  const onCursorLine = (from, to) => {
+    const lineA = state.doc.lineAt(from).number;
+    const lineB = state.doc.lineAt(Math.max(from, to - 1)).number;
+    // Only suppress single-line nodes on the cursor line — multi-line containers must
+    // still be descended so their children on non-cursor lines get decorated.
+    return lineA === lineB && lineA === cursorLine;
+  };
+  // All marks go into one builder (marks can overlap). HR widget replaces go into a second.
+  const markDecs = [];
+  const hrDecs = [];
+  const vFrom = view.visibleRanges[0]?.from ?? 0;
+  const vTo   = view.visibleRanges[view.visibleRanges.length - 1]?.to ?? state.doc.length;
+
+  syntaxTree(state).iterate({
+    from: vFrom, to: vTo,
+    enter(node) {
+      const { from, to, name } = node;
+      if (onCursorLine(from, to)) return false;
+      switch (name) {
+        case "FencedCode": case "CodeBlock": case "HTMLBlock": return false;
+        case "ATXHeading1": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h1" }) }); break;
+        case "ATXHeading2": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h2" }) }); break;
+        case "ATXHeading3": case "ATXHeading4": case "ATXHeading5": case "ATXHeading6":
+          markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-h3" }) }); break;
+        case "HeaderMark": {
+          const extra = state.doc.sliceString(to, to + 1) === " " ? 1 : 0;
+          markDecs.push({ from, to: to + extra, dec: HIDDEN }); break;
+        }
+        case "StrongEmphasis": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-bold" }) }); break;
+        case "Emphasis":       markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-italic" }) }); break;
+        case "Strikethrough":  markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-strike" }) }); break;
+        case "EmphasisMark": case "StrikethroughMark":
+          markDecs.push({ from, to, dec: HIDDEN }); break;
+        case "InlineCode": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-code" }) }); break;
+        case "CodeMark":   markDecs.push({ from, to, dec: HIDDEN }); break;
+        case "Link": case "Image": markDecs.push({ from, to, dec: Decoration.mark({ class: "cm-md-link" }) }); break;
+        case "LinkMark": case "URL": case "LinkTitle":
+          markDecs.push({ from, to, dec: HIDDEN }); break;
+        case "HorizontalRule":
+          hrDecs.push({ from, to, dec: Decoration.replace({ widget: HR_WIDGET }) }); break;
+      }
+    },
+  });
+
+  // Wikilinks via regex (not in lezer-markdown AST)
+  const text = state.doc.sliceString(vFrom, vTo);
+  const wlRe = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+  let wm;
+  while ((wm = wlRe.exec(text)) !== null) {
+    const wFrom = vFrom + wm.index, wTo = wFrom + wm[0].length;
+    if (onCursorLine(wFrom, wTo)) continue;
+    const wlName = wm[1]; const label = wm[2];
+    markDecs.push({ from: wFrom, to: wTo, dec: Decoration.mark({ class: "cm-md-wikilink" }) });
+    markDecs.push({ from: wFrom, to: wFrom + 2, dec: HIDDEN });                             // [[
+    if (label) markDecs.push({ from: wFrom + 2, to: wFrom + 2 + wlName.length + 1, dec: HIDDEN }); // name|
+    markDecs.push({ from: wTo - 2, to: wTo, dec: HIDDEN });                                 // ]]
+  }
+
+  const byPos = (a, b) => a.from !== b.from ? a.from - b.from : a.to - b.to;
+  markDecs.sort(byPos);
+
+  const mb = new RangeSetBuilder();
+  for (const { from, to, dec } of markDecs) mb.add(from, to, dec);
+
+  if (hrDecs.length === 0) return mb.finish();
+
+  hrDecs.sort(byPos);
+  const hb = new RangeSetBuilder();
+  for (const { from, to, dec } of hrDecs) hb.add(from, to, dec);
+  return RangeSet.join([mb.finish(), hb.finish()]);
+}
+
+const markdownLivePreview = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.tree = syntaxTree(view.state);
+    this.decorations = buildMarkdownDecorations(view);
+  }
+  update(update) {
+    const tree = syntaxTree(update.state);
+    if (update.docChanged || update.selectionSet || update.viewportChanged || tree !== this.tree) {
+      this.tree = tree;
+      this.decorations = buildMarkdownDecorations(update.view);
+    }
+  }
+}, { decorations: v => v.decorations });
 
 // ─── Markdown ─────────────────────────────────────────────────────────────────
 
@@ -963,13 +1098,13 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const T = useT();
   const [raw,     setRaw]     = useState("");
   const [loading, setLoading] = useState(true);
-  const [mode,    setMode]    = useState("preview"); // preview | edit
+  const [mode,    setMode]    = useState("preview");
   const [blinks,  setBlinks]  = useState([]);
   const [showBL,  setShowBL]  = useState(false);
-  // Two separate scroll owners: preview uses the outer div; edit uses the textarea itself
-  // (textarea height:100% collapses the outer div's scrollable area to zero in edit mode)
-  const scrollRef   = useRef(null); // outer scroll div — active in preview
-  const textareaRef = useRef(null); // textarea — active in edit
+  const scrollRef      = useRef(null);  // preview scroll div
+  const cmContainerRef = useRef(null);  // CM6 mount point
+  const cmViewRef      = useRef(null);  // CM6 EditorView instance
+  const noteThemeComp  = useRef(new Compartment());
 
   useEffect(() => {
     let cancelled = false;
@@ -983,58 +1118,19 @@ function NoteView({ name, onNavigate, onUserSave }) {
     return () => { cancelled = true; };
   }, [name]);
 
-  // Restore preview scroll after content loads (layout effect avoids position-0 flash)
+  // Restore preview scroll after content loads
   useLayoutEffect(() => {
-    if (!loading && scrollRef.current) {
+    if (!loading && scrollRef.current && mode === "preview") {
       scrollRef.current.scrollTop = noteScrollCache.get(`${name}:preview`) ?? 0;
     }
   }, [name, loading]);
 
-  // After every mode switch, restore scroll — track by percentage so both modes stay in sync
-  useLayoutEffect(() => {
-    const pct = noteScrollCache.get(`${name}:pct`);
-    if (mode === "preview" && scrollRef.current) {
-      const el = scrollRef.current;
-      if (pct != null) {
-        el.scrollTop = Math.round(pct * Math.max(0, el.scrollHeight - el.clientHeight));
-      } else {
-        el.scrollTop = noteScrollCache.get(`${name}:preview`) ?? 0;
-      }
-    } else if (mode === "edit" && textareaRef.current) {
-      const el = textareaRef.current;
-      if (pct != null) {
-        el.scrollTop = Math.round(pct * Math.max(0, el.scrollHeight - el.clientHeight));
-      } else {
-        el.scrollTop = noteScrollCache.get(`${name}:edit`) ?? 0;
-      }
-    }
-  }, [mode, name]);
-
-  // Save both scroll positions on unmount (only the active mode's ref will be non-null)
+  // Save preview scroll on unmount
   useEffect(() => {
     return () => {
-      if (scrollRef.current)   noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
-      if (textareaRef.current) noteScrollCache.set(`${name}:edit`,    textareaRef.current.scrollTop);
+      if (scrollRef.current) noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
     };
   }, [name]);
-
-  // Save scroll + percentage before switching modes so the new mode starts at the same position
-  const switchMode = useCallback((newMode) => {
-    if (newMode === mode) return;
-    if (mode === "preview" && scrollRef.current) {
-      const el = scrollRef.current;
-      noteScrollCache.set(`${name}:preview`, el.scrollTop);
-      const max = el.scrollHeight - el.clientHeight;
-      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
-    }
-    if (mode === "edit" && textareaRef.current) {
-      const el = textareaRef.current;
-      noteScrollCache.set(`${name}:edit`, el.scrollTop);
-      const max = el.scrollHeight - el.clientHeight;
-      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
-    }
-    setMode(newMode);
-  }, [mode, name]);
 
   const doSave = useCallback(async (text) => {
     await api.saveNote(name, text);
@@ -1042,6 +1138,50 @@ function NoteView({ name, onNavigate, onUserSave }) {
   }, [name, onUserSave]);
 
   const debouncedSave = useDebounced(doSave, 800);
+  const debouncedSaveRef = useRef(debouncedSave);
+  useEffect(() => { debouncedSaveRef.current = debouncedSave; }, [debouncedSave]);
+
+  // Mount / destroy CM6 note editor when in edit mode
+  useEffect(() => {
+    if (mode !== "edit" || loading || !cmContainerRef.current) return;
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: raw,  // capture initial content at mount time
+        extensions: [
+          markdown(),
+          history(),
+          keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          EditorView.lineWrapping,
+          markdownLivePreview,
+          noteThemeComp.current.of(makeNoteEditorTheme(T)),
+          EditorView.updateListener.of(update => {
+            if (!update.docChanged) return;
+            const newText = update.state.doc.toString();
+            setRaw(newText);
+            debouncedSaveRef.current(newText);
+          }),
+        ],
+      }),
+      parent: cmContainerRef.current,
+    });
+    cmViewRef.current = view;
+    return () => { view.destroy(); cmViewRef.current = null; };
+  }, [mode, loading, name]); // `raw` intentionally omitted — captured once at mount
+
+  // Live-update note editor theme without recreating
+  useEffect(() => {
+    if (!cmViewRef.current) return;
+    cmViewRef.current.dispatch({ effects: noteThemeComp.current.reconfigure(makeNoteEditorTheme(T)) });
+  }, [T]);
+
+  const switchMode = useCallback((newMode) => {
+    if (newMode === mode) return;
+    if (mode === "preview" && scrollRef.current) {
+      noteScrollCache.set(`${name}:preview`, scrollRef.current.scrollTop);
+    }
+    setMode(newMode);
+  }, [mode, name]);
 
   const handleClick = useCallback((e) => {
     const copyBtn = e.target.closest(".copy-btn");
@@ -1094,16 +1234,10 @@ function NoteView({ name, onNavigate, onUserSave }) {
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         {/* Main content */}
-        <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
-          {mode === "edit" ? (
-            <textarea ref={textareaRef} value={raw}
-              onChange={e => { setRaw(e.target.value); debouncedSave(e.target.value); }}
-              style={{ width: "100%", height: "100%", boxSizing: "border-box",
-                background: T.surface, color: T.text, border: "none", outline: "none", resize: "none",
-                fontFamily: T.mono, fontSize: 13, lineHeight: 1.7,
-                padding: "28px 32px",
-              }} />
-          ) : (
+        {mode === "edit" ? (
+          <div ref={cmContainerRef} style={{ flex: 1, overflow: "hidden" }} />
+        ) : (
+          <div ref={scrollRef} style={{ flex: 1, overflow: "auto" }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
               {segs.map((seg) =>
@@ -1112,8 +1246,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
                 : <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text) }} />
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Backlinks panel */}
         {showBL && (
