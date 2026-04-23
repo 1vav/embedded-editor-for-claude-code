@@ -23,7 +23,6 @@ function getVersion(pkg) {
 const MCP_SERVER_ENTRY = {
   command: "npx",
   args: ["-y", "embedded-editor-for-claude-code@latest", "serve", "--mcp"],
-  env: { EXCALIDRAW_ROOT: "." },
 };
 
 function buildClaudeMdBlock() {
@@ -200,7 +199,7 @@ grep -il "embedded.editor\\|embedded-editor" CLAUDE.md 2>/dev/null && echo "PROJ
 
 If both outputs are "no" — this project does not use Embedded Editor. Stop here silently without modifying any files.
 
-**Step 2.** Safely update \`.claude/launch.json\` using Node.js. This command surgically adds or updates only the "Embedded Editor" entry — all other entries in the file are preserved exactly as-is:
+**Step 2.** Safely update \`.claude/launch.json\` using Node.js. This command surgically adds or updates only the "Embedded Editor" entry — all other entries in the file are preserved exactly as-is. The port is derived from your project path so each project gets its own stable port:
 
 \`\`\`bash
 node -e "
@@ -213,16 +212,19 @@ if (fs.existsSync(file)) {
   try { config = JSON.parse(fs.readFileSync(file, 'utf8')); } catch(e) {}
 }
 if (!Array.isArray(config.configurations)) config.configurations = [];
-const entry = { name: 'Embedded Editor', runtimeExecutable: nodeBin, runtimeArgs: [cliPath, 'view'], port: 3000 };
+var p = process.cwd(), h = 0;
+for (var i = 0; i < p.length; i++) h = (h * 31 + p.charCodeAt(i)) >>> 0;
+var port = 3100 + (h % 900);
+const entry = { name: 'Embedded Editor', runtimeExecutable: nodeBin, runtimeArgs: [cliPath, 'view', String(port)], port };
 const idx = config.configurations.findIndex(c => c.name === 'Embedded Editor');
 if (idx >= 0) config.configurations[idx] = entry; else config.configurations.push(entry);
 fs.mkdirSync('.claude', { recursive: true });
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\\n');
-console.log(idx >= 0 ? 'Updated Embedded Editor entry' : 'Added Embedded Editor entry');
+console.log((idx >= 0 ? 'Updated' : 'Added') + ' Embedded Editor entry on port ' + port);
 " "$(which node)" "$(npm root -g 2>/dev/null)/embedded-editor-for-claude-code/bin/cli.js"
 \`\`\`
 
-**Step 3.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server and opens the preview pane pointing to http://127.0.0.1:3000 automatically.
+**Step 3.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server on the project-specific port and opens the preview pane automatically.
 `;
 
 const STOP_COMMAND = `\
@@ -231,11 +233,11 @@ description: Stop the Embedded Editor viewer server
 allowed-tools: Bash
 ---
 
-Stop the Embedded Editor viewer server that was started with /editor-serve.
+Stop the Embedded Editor viewer server for this project.
 
 \`\`\`bash
-pkill -f "embedded-editor-for-claude-code" 2>/dev/null
-lsof -ti:3000 | xargs kill 2>/dev/null
+PORT=$(node -e "var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))")
+lsof -ti:$PORT | xargs kill 2>/dev/null
 echo "done"
 \`\`\`
 
@@ -278,20 +280,23 @@ function buildSessionStartHook() {
   const cliJs    = npmRoot ? `${npmRoot}/embedded-editor-for-claude-code/bin/cli.js` : null;
   const npxBin   = resolveBin("npx");
 
+  // Inline port derivation: same hash as derivePort() in paths.js — no file reads needed.
+  const derivePort = `var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))`;
+
   let serveCmd;
   if (nodeBin && cliJs) {
-    serveCmd = `"${nodeBin}" "${cliJs}" view`;
+    serveCmd = `"${nodeBin}" "${cliJs}" view $PORT`;
   } else if (npxBin) {
     // Fallback: npx with absolute path (slower but works)
-    serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code serve`;
+    serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code view $PORT`;
   } else {
-    serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" serve`;
+    serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" view $PORT`;
   }
   return {
     type: "command",
-    // Start the viewer server in the background if nothing is on port 3000 yet.
-    // Runs silently — output goes to /tmp/embedded-editor.log.
-    command: `lsof -ti:${DEFAULT_PORT} > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
+    // Derive port from cwd hash so each project gets its own stable port (3100–3999).
+    // Start the viewer in the background only if that port is free.
+    command: `PORT=$(node -e "${derivePort}"); lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
   };
 }
 
@@ -410,7 +415,7 @@ export async function runInit({ global: isGlobal = false } = {}) {
   console.log(chalk.gray("  2. Ask Claude to create a diagram:"));
   console.log(chalk.cyan('     "Draw an architecture diagram of this project"'));
   console.log(chalk.gray("  3. Open the visual workspace with a slash command:"));
-  console.log(chalk.cyan("     /editor-start") + chalk.gray("  →  http://127.0.0.1:3000"));
+  console.log(chalk.cyan("     /editor-start") + chalk.gray("  →  http://127.0.0.1:{port} (derived from project path)"));
   console.log(chalk.cyan("     /editor-stop ") + chalk.gray("  →  shut it down"));
   console.log("");
   console.log(chalk.gray("  To update later:"));

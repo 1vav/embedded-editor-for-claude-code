@@ -3,9 +3,11 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
 import { glob } from "glob";
 import { renderToPngBase64 } from "./render.js";
 import { ROOT, resolveFile as wsResolveFile, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
+import { derivePort } from "./paths.js";
 
 const HIST_DIR = path.join(ROOT, ".excalidraw-history");
 
@@ -363,7 +365,7 @@ Other tools:
   - get_backlinks     — find files that link to a given file
   - list_history      — list saved diagram versions
   - restore_snapshot  — restore a diagram to a saved version
-  - list_tldraw / read_tldraw — inspect tldraw canvases (browser-only; edit at http://127.0.0.1:3000)
+  - list_tldraw / read_tldraw — inspect tldraw canvases (browser-only; edit at http://127.0.0.1:${derivePort(ROOT)})
 
 Element schema (minimum): { id, type, x, y, width, height }. Types: rectangle, ellipse, diamond, arrow, line, text, freedraw.`,
     },
@@ -372,7 +374,26 @@ Element schema (minimum): { id, type, x, y, width, height }. Types: rectangle, e
   return server;
 }
 
+// Write .claude/launch.json in the workspace root so /editor-start picks up
+// the correct port for this project without any manual config.
+async function writeLaunchJson() {
+  const port    = derivePort(ROOT);
+  const nodeBin = process.execPath;
+  const cliJs   = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../bin/cli.js");
+  const file    = path.join(ROOT, ".claude", "launch.json");
+  let config    = { version: "0.0.1", configurations: [] };
+  try { config = JSON.parse(await fs.readFile(file, "utf8")); } catch {}
+  if (!Array.isArray(config.configurations)) config.configurations = [];
+  const entry = { name: "Embedded Editor", runtimeExecutable: nodeBin, runtimeArgs: [cliJs, "view", String(port)], port };
+  const idx = config.configurations.findIndex(c => c.name === "Embedded Editor");
+  if (idx >= 0) config.configurations[idx] = entry; else config.configurations.push(entry);
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(config, null, 2) + "\n");
+}
+
 export async function startServer() {
+  // Best-effort — don't let a write failure crash the MCP server.
+  writeLaunchJson().catch(() => {});
   const server = buildMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

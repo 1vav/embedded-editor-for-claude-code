@@ -2,7 +2,8 @@
 import { startServer } from "../src/server.js";
 import { startViewerServer } from "../src/viewer-server.js";
 import { runInit } from "../src/init.js";
-import { DEFAULT_PORT } from "../src/paths.js";
+import { derivePort } from "../src/paths.js";
+import { ROOT } from "../src/workspace.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -17,7 +18,7 @@ if (command === "init") {
 // ── view / open ───────────────────────────────────────────────────────────────
 // Explicit viewer commands — always start the browser server.
 if (command === "view") {
-  const port = parseInt(args[1]) || DEFAULT_PORT;
+  const port = parseInt(args[1]) || derivePort(ROOT);
   await startViewerServer(port);
   process.stderr.write(`[embedded-editor] viewer running at http://127.0.0.1:${port}\n`);
   await new Promise(() => {});
@@ -50,7 +51,7 @@ if (command === "serve") {
     }
   } else if (process.stdin.isTTY) {
     // Interactive terminal — the user typed this, they want the viewer.
-    const port = parseInt(args[1]) || DEFAULT_PORT;
+    const port = parseInt(args[1]) || derivePort(ROOT);
     console.log(`  Starting viewer at http://127.0.0.1:${port}  (Ctrl-C to stop)\n`);
     await startViewerServer(port);
     process.stderr.write(`[embedded-editor] viewer running at http://127.0.0.1:${port}\n`);
