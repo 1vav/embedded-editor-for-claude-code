@@ -14,7 +14,7 @@ import { EditorView, ViewPlugin, Decoration, WidgetType, lineNumbers, highlightA
 import { EditorState, Compartment, RangeSetBuilder, RangeSet } from "@codemirror/state";
 import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { syntaxHighlighting, defaultHighlightStyle, syntaxTree, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
-import { closeBrackets, closeBracketsKeymap, autocompletion } from "@codemirror/autocomplete";
+import { closeBrackets, closeBracketsKeymap, autocompletion, startCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { searchKeymap } from "@codemirror/search";
 // Bundled languages (always in main chunk)
 import { markdown } from "@codemirror/lang-markdown";
@@ -1131,42 +1131,47 @@ function TldrawEmbed({ name, onOpen }) {
 
 // ─── Slash commands ───────────────────────────────────────────────────────────
 
-// Convert a description string into a filename-safe slug.
-function slugify(desc) {
-  return desc
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 48) || "untitled";
-}
 
 // CM6 completion source that handles /diagram, /canvas, /note, /link commands.
 // When a file is created with a description, fires a "slash-prompt" CustomEvent
 // so the App-level PromptBar can pre-fill and auto-copy the Claude instruction.
 function makeSlashSource() {
+  const ALL_CMDS = ["diagram", "canvas", "note", "link"];
+  const CMD_DETAIL = {
+    diagram: "embed Excalidraw diagram",
+    canvas:  "embed tldraw canvas",
+    note:    "create & link a note",
+    link:    "link to existing file",
+  };
+
   return async function slashSource(context) {
     const line = context.state.doc.lineAt(context.pos);
     const lineText = context.state.doc.sliceString(line.from, context.pos);
-    // Match "/cmd" or "/cmd <description>" at the very start of the line
-    const m = lineText.match(/^\/(diagram|canvas|note|link)?([ \t](.*))?$/i);
+    // Match "/" followed by any word chars, then optionally a space + description.
+    // Using [\w]* (not the alternation) so partial typing like /di, /dia also matches.
+    const m = lineText.match(/^\/([\w]*)(\s+(.*))?$/);
     if (!m) return null;
-    const cmd  = (m[1] || "").toLowerCase();
-    const desc = (m[3] || "").trim();
+    const cmdTyped = m[1].toLowerCase();          // "" | "d" | "di" | "diagram" | …
+    const hasSpace = m[2] !== undefined;           // user pressed space after command
+    const desc     = (m[3] || "").trim();
 
-    // Just "/" typed — show the command menu
-    if (!m[1]) {
+    // Still typing the command word — show matching commands as prefix completions
+    if (!hasSpace) {
+      const matching = ALL_CMDS.filter(c => c.startsWith(cmdTyped));
+      if (matching.length === 0) return null;
       return {
         from: line.from, filter: false,
-        options: [
-          { label: "/diagram", detail: "embed Excalidraw diagram", boost: 4 },
-          { label: "/canvas",  detail: "embed tldraw canvas",      boost: 3 },
-          { label: "/note",    detail: "create & link a note",     boost: 2 },
-          { label: "/link",    detail: "link to existing file",    boost: 1 },
-        ],
+        options: matching.map((c, i) => ({
+          label:  `/${c}`,
+          detail: CMD_DETAIL[c],
+          boost:  ALL_CMDS.length - i,
+        })),
       };
     }
+
+    // Confirm the command is a known full word
+    const cmd = ALL_CMDS.find(c => c === cmdTyped);
+    if (!cmd) return null;
 
     // /link — show searchable list of all existing files
     if (cmd === "link") {
@@ -1199,31 +1204,31 @@ function makeSlashSource() {
     }
 
     // /diagram, /canvas, /note — show a single "create" option
-    const slug        = desc ? slugify(desc) : null;
-    const namePreview = slug || `${cmd}-${Date.now() % 100000}`;
     const descPreview = desc ? (desc.length > 48 ? desc.slice(0, 48) + "…" : desc) : `empty ${cmd}`;
     return {
       from: line.from, filter: false,
       options: [{
-        label:  `create "${namePreview}"`,
-        detail: desc ? `— ${descPreview}` : `new ${cmd}`,
+        label:  desc ? `↵ ${descPreview}` : `create new ${cmd}`,
+        detail: cmd === "diagram" ? "⬡ excalidraw" : cmd === "canvas" ? "◈ tldraw" : "¶ note",
         async apply(view, _, from) {
-          const name    = slug || `${cmd}-${Date.now()}`;
+          // Auto-generate a short unique name — the description is the Claude prompt, not the filename
+          const id   = Date.now().toString(36);          // e.g. "m5j3k2"
+          const name = `${cmd}-${id}`;
           const lineEnd = view.state.doc.lineAt(from).to;
           let insert, claudePrompt;
           try {
             if (cmd === "diagram") {
               await api.newDiag(name);
               insert = `![[${name}.excalidraw]]`;
-              if (desc) claudePrompt = `Please create a diagram called "${name}": ${desc}. Use the write_diagram MCP tool.`;
+              if (desc) claudePrompt = `${desc}\n\nDiagram file: [[${name}.excalidraw]] (already created). Use the write_diagram MCP tool to populate it.`;
             } else if (cmd === "canvas") {
               await api.newTldraw(name);
               insert = `![[${name}.tldraw]]`;
-              // tldraw is browser-only — Claude can't write it
+              // tldraw is browser-only — no Claude prompt needed
             } else if (cmd === "note") {
               await api.newNote(name);
               insert = `[[${name}]]`;
-              if (desc) claudePrompt = `Please write content for the note [[${name}]]: ${desc}. Use the write_note MCP tool.`;
+              if (desc) claudePrompt = `${desc}\n\nNote file: [[${name}]] (already created). Use the write_note MCP tool to populate it.`;
             }
           } catch (e) {
             console.error("[slash-cmd] create failed:", e);
@@ -1231,7 +1236,6 @@ function makeSlashSource() {
           }
           view.dispatch({ changes: { from, to: lineEnd, insert }, selection: { anchor: from + insert.length } });
           if (claudePrompt) {
-            // Bubble up to the App-level PromptBar to pre-fill + auto-copy
             document.dispatchEvent(new CustomEvent("slash-prompt", { detail: claudePrompt }));
           }
         },
@@ -1296,22 +1300,36 @@ function NoteView({ name, onNavigate, onUserSave }) {
   // Mount CM6 note editor once per note load; keep it alive across mode switches (hidden in preview)
   useEffect(() => {
     if (loading || !cmContainerRef.current) return;
+    const slashExt = EditorView.updateListener.of(update => {
+      if (!update.docChanged) return;
+      // Re-trigger completion on every keystroke when the cursor line starts with "/"
+      // (space after the command word would otherwise close the popup)
+      const pos  = update.state.selection.main.head;
+      const line = update.state.doc.lineAt(pos);
+      const lineText = update.state.doc.sliceString(line.from, pos);
+      if (/^\/\w/.test(lineText)) {
+        startCompletion(update.view);
+      }
+    });
     const view = new EditorView({
       state: EditorState.create({
         doc: raw,  // capture initial content at mount time
         extensions: [
           markdown(),
           history(),
-          keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+          keymap.of([...completionKeymap, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
           markdownLivePreview,
           autocompletion({
             override: [makeSlashSource()],
-            activateOnTyping: true,
+            activateOnTyping: true,   // handles re-triggering as user types d,i,a,g…
             closeOnBlur: false,
             maxRenderedOptions: 12,
           }),
+          // "/" is not a word char so activateOnTyping won't fire for it.
+          // slashExt is defined above useEffect to avoid inline-function scope issues.
+          slashExt,
           noteThemeComp.current.of(makeNoteEditorTheme(T)),
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return;

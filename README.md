@@ -4,7 +4,6 @@ An embedded visual workspace for Claude Code — edit Excalidraw diagrams, tldra
 
 ![ee.png](assets/ee.png)
 
-
 Claude also gets **six MCP tools** to create and edit Excalidraw diagrams inline, with authentic PNG previews rendered by Excalidraw's own pipeline and returned directly in the chat.
 
 ---
@@ -130,6 +129,35 @@ Claude calls the MCP tools and returns PNG previews inline as it builds the diag
 - **Live rename** — renaming rewrites all `[[wikilinks]]` across the project
 - **Live sync** — SSE events push changes to all open tabs instantly
 - **Light/dark** — follows your OS preference
+
+### Slash commands
+
+In the Markdown note editor, type `/` at the start of a line to open the command palette:
+
+![slash_commands.png](assets/slash_commands.png)
+
+| Command | What it does |
+|---|---|
+| `/diagram [description]` | Creates a new Excalidraw diagram, embeds it as `![[name.excalidraw]]`, and pre-fills the prompt bar with your description so Claude populates it |
+| `/canvas [description]` | Creates a new tldraw canvas and embeds it as `![[name.tldraw]]` |
+| `/note [description]` | Creates a new linked Markdown note, embeds it as `[[name]]`, and pre-fills the prompt bar for Claude to write its content |
+| `/link` | Opens a searchable picker of all existing files and inserts a wikilink |
+
+**How it works:**
+
+1. Type `/diagram` (or `/d` to narrow) — the palette shows matching commands
+2. Press `Space` and type a description — the option updates to show your text
+3. Press `Tab` or `Enter` to accept — the file is created instantly, the slash command is replaced with the wikilink embed, and the prompt bar below is pre-filled with your description ready to send to Claude
+
+Example: typing `/diagram show the auth flow` then pressing Tab creates `diagram-abc123.excalidraw`, inserts `![[diagram-abc123.excalidraw]]` in the note, and pre-fills:
+
+```
+show the auth flow
+
+Diagram file: [[diagram-abc123.excalidraw]] (already created). Use the write_diagram MCP tool to populate it.
+```
+
+Copy that into Claude and it draws the diagram directly into the linked file.
 
 ---
 
