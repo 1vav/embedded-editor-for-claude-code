@@ -487,11 +487,11 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
   const T = useT();
   const [q,            setQ]            = useState("");
   const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code
-  const [closedFolders, setClosedFolders] = useState(new Set());
+  const [openFolders, setOpenFolders] = useState(new Set()); // empty = all collapsed by default
   const ref = useRef();
   useClickOutside(ref, onClose);
 
-  const toggleFolder = path => setClosedFolders(prev => {
+  const toggleFolder = path => setOpenFolders(prev => {
     const next = new Set(prev);
     next.has(path) ? next.delete(path) : next.add(path);
     return next;
@@ -573,7 +573,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
                 onDelete={() => onDelete(f.name, f.type)} />
             )) : (
               <FileTree node={buildFileTree(shown)} depth={0}
-                closedFolders={closedFolders} toggleFolder={toggleFolder}
+                openFolders={openFolders} toggleFolder={toggleFolder}
                 active={active}
                 onOpen={(name, type) => { onOpen(name, type); onClose(); }}
                 onDelete={onDelete}
@@ -654,13 +654,13 @@ function buildFileTree(files) {
   return root;
 }
 
-function FileTree({ node, depth, closedFolders, toggleFolder, active, onOpen, onDelete, pathPrefix }) {
+function FileTree({ node, depth, openFolders, toggleFolder, active, onOpen, onDelete, pathPrefix }) {
   const T = useT();
   const indent = depth * 12;
   return <>
     {Object.keys(node.folders).sort().map(folder => {
       const fullFolderPath = pathPrefix ? `${pathPrefix}/${folder}` : folder;
-      const isOpen = !closedFolders.has(fullFolderPath);
+      const isOpen = openFolders.has(fullFolderPath);
       return (
         <div key={fullFolderPath}>
           <div onClick={() => toggleFolder(fullFolderPath)} style={{
@@ -680,7 +680,7 @@ function FileTree({ node, depth, closedFolders, toggleFolder, active, onOpen, on
           </div>
           {isOpen && (
             <FileTree node={node.folders[folder]} depth={depth + 1}
-              closedFolders={closedFolders} toggleFolder={toggleFolder}
+              openFolders={openFolders} toggleFolder={toggleFolder}
               active={active} onOpen={onOpen} onDelete={onDelete}
               pathPrefix={fullFolderPath} />
           )}
