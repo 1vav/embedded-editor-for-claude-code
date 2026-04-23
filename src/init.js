@@ -309,8 +309,12 @@ function buildSessionStartHook() {
 
   return {
     type: "command",
-    // Compute port, write launch.json (instant Preview pane), then start viewer if needed.
-    command: `PORT=$(${nodeExec} -e "${portScript}"); ${writePart}lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
+    // Compute port, write launch.json, then start viewer only if health check fails.
+    // Health-check-first is more robust than lsof-only: it handles crashed-but-port-stuck
+    // (CLOSE_WAIT) and stale-after-upgrade scenarios. If /health responds, the server is
+    // good and we skip starting entirely. If it doesn't, we kill whatever holds the port
+    // (zombie, wrong process, stale state) and start fresh.
+    command: `PORT=$(${nodeExec} -e "${portScript}"); ${writePart}curl -sf --max-time 1 http://127.0.0.1:$PORT/health > /dev/null 2>&1 || { lsof -ti:$PORT | xargs kill -9 2>/dev/null; sleep 0.3; ${serveCmd} > /tmp/embedded-editor.log 2>&1 & }`,
   };
 }
 
