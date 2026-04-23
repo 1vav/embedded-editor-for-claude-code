@@ -702,7 +702,7 @@
     "currentItemStrokeWidth": 2,
     "currentItemTextAlign": "left",
     "currentHoveredFontFamily": null,
-    "cursorButton": "down",
+    "cursorButton": "up",
     "activeEmbeddable": null,
     "newElement": null,
     "editingTextElement": null,
@@ -742,9 +742,7 @@
       "shown": false,
       "data": null
     },
-    "previousSelectedElementIds": {
-      "claude-box": true
-    },
+    "previousSelectedElementIds": {},
     "resizingElement": null,
     "scrolledOutside": false,
     "scrollX": 41,
@@ -790,8 +788,8 @@
     "searchMatches": [],
     "offsetLeft": 0,
     "offsetTop": 40,
-    "width": 479,
-    "height": 644
+    "width": 879,
+    "height": 877
   },
   "files": {}
 }

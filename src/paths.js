@@ -15,12 +15,19 @@ export function expandPath(raw) {
   return out;
 }
 
-// Walk up from dir looking for .git or CLAUDE.md to find the project root.
-// Falls back to dir itself if none found.
+// Walk up from dir looking for workspace anchors to find the project root.
+// Anchors in priority order: .claude/ (Claude Code project), .git, CLAUDE.md.
+// .claude/ is checked first because it's the most specific signal — a folder
+// that has been explicitly initialised as a Claude Code workspace should win
+// over a parent that merely has a CLAUDE.md or git root.
 function findProjectRoot(dir) {
   let current = path.resolve(dir);
   while (true) {
-    if (existsSync(path.join(current, ".git")) || existsSync(path.join(current, "CLAUDE.md"))) {
+    if (
+      existsSync(path.join(current, ".claude")) ||
+      existsSync(path.join(current, ".git")) ||
+      existsSync(path.join(current, "CLAUDE.md"))
+    ) {
       return current;
     }
     const parent = path.dirname(current);
