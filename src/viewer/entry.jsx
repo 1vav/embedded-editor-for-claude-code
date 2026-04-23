@@ -14,7 +14,7 @@ import { EditorView, ViewPlugin, Decoration, WidgetType, lineNumbers, highlightA
 import { EditorState, Compartment, RangeSetBuilder, RangeSet } from "@codemirror/state";
 import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
 import { syntaxHighlighting, defaultHighlightStyle, syntaxTree, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
-import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
+import { closeBrackets, closeBracketsKeymap, autocompletion } from "@codemirror/autocomplete";
 import { searchKeymap } from "@codemirror/search";
 // Bundled languages (always in main chunk)
 import { markdown } from "@codemirror/lang-markdown";
@@ -122,6 +122,13 @@ function makeNoteEditorTheme(T) {
     ".cm-md-link":     { color: T.blue },
     ".cm-md-wikilink": { color: T.blue, cursor: "pointer" },
     ".cm-md-hr":       { display: "block", borderTop: `1px solid ${T.border}`, margin: "0.5em 0", height: "0", width: "100%" },
+    // Slash-command autocomplete popup
+    ".cm-tooltip":                                    { background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", boxShadow: "0 8px 28px rgba(0,0,0,.45)", overflow: "hidden", padding: "3px 0" },
+    ".cm-tooltip-autocomplete ul":                    { fontFamily: T.mono, margin: 0, padding: 0, listStyle: "none" },
+    ".cm-tooltip-autocomplete ul li":                 { padding: "6px 14px", display: "flex", alignItems: "baseline", gap: "10px", cursor: "pointer" },
+    ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: T.surface3 },
+    ".cm-completionLabel":                            { flex: "1", color: T.text, fontSize: "12px" },
+    ".cm-completionDetail":                           { color: T.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
   }, { dark: T.isDark });
 }
 
@@ -1122,14 +1129,126 @@ function TldrawEmbed({ name, onOpen }) {
   );
 }
 
+// ─── Slash commands ───────────────────────────────────────────────────────────
+
+// Convert a description string into a filename-safe slug.
+function slugify(desc) {
+  return desc
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 48) || "untitled";
+}
+
+// CM6 completion source that handles /diagram, /canvas, /note, /link commands.
+// When a file is created with a description, fires a "slash-prompt" CustomEvent
+// so the App-level PromptBar can pre-fill and auto-copy the Claude instruction.
+function makeSlashSource() {
+  return async function slashSource(context) {
+    const line = context.state.doc.lineAt(context.pos);
+    const lineText = context.state.doc.sliceString(line.from, context.pos);
+    // Match "/cmd" or "/cmd <description>" at the very start of the line
+    const m = lineText.match(/^\/(diagram|canvas|note|link)?([ \t](.*))?$/i);
+    if (!m) return null;
+    const cmd  = (m[1] || "").toLowerCase();
+    const desc = (m[3] || "").trim();
+
+    // Just "/" typed — show the command menu
+    if (!m[1]) {
+      return {
+        from: line.from, filter: false,
+        options: [
+          { label: "/diagram", detail: "embed Excalidraw diagram", boost: 4 },
+          { label: "/canvas",  detail: "embed tldraw canvas",      boost: 3 },
+          { label: "/note",    detail: "create & link a note",     boost: 2 },
+          { label: "/link",    detail: "link to existing file",    boost: 1 },
+        ],
+      };
+    }
+
+    // /link — show searchable list of all existing files
+    if (cmd === "link") {
+      const [diagrams, notes, tldraws] = await Promise.all([
+        api.diagrams().catch(() => []),
+        api.notes().catch(() => []),
+        api.tldrawList().catch(() => []),
+      ]);
+      const allOpts = [
+        ...diagrams.map(n => ({ label: n, detail: "⬡ diagram", ftype: "diagram" })),
+        ...notes.map(n =>    ({ label: n, detail: "¶ note",    ftype: "note"    })),
+        ...tldraws.map(n =>  ({ label: n, detail: "◈ canvas",  ftype: "tldraw"  })),
+      ];
+      const opts = desc
+        ? allOpts.filter(o => o.label.toLowerCase().includes(desc.toLowerCase()))
+        : allOpts;
+      return {
+        from: line.from, filter: false,
+        options: opts.map(o => ({
+          label: o.label, detail: o.detail,
+          apply(view, _, from) {
+            const lineEnd = view.state.doc.lineAt(from).to;
+            const insert  = o.ftype === "diagram" ? `![[${o.label}.excalidraw]]`
+                          : o.ftype === "tldraw"  ? `![[${o.label}.tldraw]]`
+                          : `[[${o.label}]]`;
+            view.dispatch({ changes: { from, to: lineEnd, insert }, selection: { anchor: from + insert.length } });
+          },
+        })),
+      };
+    }
+
+    // /diagram, /canvas, /note — show a single "create" option
+    const slug        = desc ? slugify(desc) : null;
+    const namePreview = slug || `${cmd}-${Date.now() % 100000}`;
+    const descPreview = desc ? (desc.length > 48 ? desc.slice(0, 48) + "…" : desc) : `empty ${cmd}`;
+    return {
+      from: line.from, filter: false,
+      options: [{
+        label:  `create "${namePreview}"`,
+        detail: desc ? `— ${descPreview}` : `new ${cmd}`,
+        async apply(view, _, from) {
+          const name    = slug || `${cmd}-${Date.now()}`;
+          const lineEnd = view.state.doc.lineAt(from).to;
+          let insert, claudePrompt;
+          try {
+            if (cmd === "diagram") {
+              await api.newDiag(name);
+              insert = `![[${name}.excalidraw]]`;
+              if (desc) claudePrompt = `Please create a diagram called "${name}": ${desc}. Use the write_diagram MCP tool.`;
+            } else if (cmd === "canvas") {
+              await api.newTldraw(name);
+              insert = `![[${name}.tldraw]]`;
+              // tldraw is browser-only — Claude can't write it
+            } else if (cmd === "note") {
+              await api.newNote(name);
+              insert = `[[${name}]]`;
+              if (desc) claudePrompt = `Please write content for the note [[${name}]]: ${desc}. Use the write_note MCP tool.`;
+            }
+          } catch (e) {
+            console.error("[slash-cmd] create failed:", e);
+            return;
+          }
+          view.dispatch({ changes: { from, to: lineEnd, insert }, selection: { anchor: from + insert.length } });
+          if (claudePrompt) {
+            // Bubble up to the App-level PromptBar to pre-fill + auto-copy
+            document.dispatchEvent(new CustomEvent("slash-prompt", { detail: claudePrompt }));
+          }
+        },
+      }],
+    };
+  };
+}
+
+
 function NoteView({ name, onNavigate, onUserSave }) {
   const T = useT();
-  const [raw,     setRaw]     = useState("");
-  const [loading, setLoading] = useState(true);
-  const [mode,    setMode]    = useState("preview");
-  const [blinks,  setBlinks]  = useState([]);
-  const [showBL,  setShowBL]  = useState(false);
-  const [dropPopup, setDropPopup] = useState(null); // { file, x, y, pos }
+  const [raw,       setRaw]       = useState("");
+  const [loading,   setLoading]   = useState(true);
+  const [mode,      setMode]      = useState("preview");
+  const [blinks,    setBlinks]    = useState([]);
+  const [showBL,    setShowBL]    = useState(false);
+  const [dropPopup, setDropPopup] = useState(null);   // { file, x, y, pos }
   const scrollRef      = useRef(null);  // preview scroll div
   const cmContainerRef = useRef(null);  // CM6 mount point
   const cmViewRef      = useRef(null);  // CM6 EditorView instance
@@ -1187,6 +1306,12 @@ function NoteView({ name, onNavigate, onUserSave }) {
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
           markdownLivePreview,
+          autocompletion({
+            override: [makeSlashSource()],
+            activateOnTyping: true,
+            closeOnBlur: false,
+            maxRenderedOptions: 12,
+          }),
           noteThemeComp.current.of(makeNoteEditorTheme(T)),
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return;
@@ -1411,6 +1536,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
         </div>,
         document.body
       )}
+
     </div>
   );
 }
@@ -1813,12 +1939,29 @@ function PromptBar({ active }) {
   const T = useT();
   const [val,   setVal]   = useState("");
   const [toast, setToast] = useState("");
+  const inputRef = useRef(null);
+
+  // Listen for slash-command "slash-prompt" events and pre-fill the bar.
+  // The slash command has already written the text to clipboard; we just show it
+  // so the user knows what was copied and can edit/re-copy if needed.
+  useEffect(() => {
+    const handler = (e) => {
+      setVal(e.detail);
+      setToast("copied — paste into claude ⌘V");
+      setTimeout(() => setToast(""), 3500);
+      inputRef.current?.focus();
+    };
+    document.addEventListener("slash-prompt", handler);
+    return () => document.removeEventListener("slash-prompt", handler);
+  }, []);
 
   const copy = () => {
     if (!val.trim()) return;
     const label = active.type === "diagram" ? `diagram "${active.name}"` : `note "${active.name}.md"`;
-    navigator.clipboard.writeText(`Update the ${label}: ${val.trim()}`).then(() => {
-      setVal(""); setToast("copied — paste into claude code ⌘V");
+    const text  = val.trim().startsWith("Please ") ? val.trim()
+                : `Update the ${label}: ${val.trim()}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setVal(""); setToast("copied — paste into claude ⌘V");
       setTimeout(() => setToast(""), 3000);
     }).catch(() => setToast("clipboard unavailable"));
   };
@@ -1827,7 +1970,7 @@ function PromptBar({ active }) {
     <div style={{ height: 44, background: T.bg, borderTop: `1px solid ${T.border}`,
       display: "flex", alignItems: "center", padding: "0 12px", gap: 8, flexShrink: 0 }}>
       <span style={{ color: T.accent, fontFamily: T.mono, fontSize: 13, flexShrink: 0 }}>$</span>
-      <input value={val} onChange={e => setVal(e.target.value)}
+      <input ref={inputRef} value={val} onChange={e => setVal(e.target.value)}
         onKeyDown={e => { if (e.key === "Enter") copy(); }}
         placeholder={`ask claude to update "${active.name}"…`}
         style={{ flex: 1, background: "transparent", border: "none", outline: "none",
