@@ -129,6 +129,7 @@ Claude calls the MCP tools and returns PNG previews inline as it builds the diag
 - **Live rename** — renaming rewrites all `[[wikilinks]]` across the project
 - **Live sync** — SSE events push changes to all open tabs instantly
 - **Light/dark** — follows your OS preference
+- **Note style picker** — font style (Serif · Sans · Literary · Compact · Mono) and color profile (Auto · Sepia · Paper · Night · Forest) selectors in the Markdown toolbar; each setting is independent and persists across sessions
 
 ### Slash commands
 
