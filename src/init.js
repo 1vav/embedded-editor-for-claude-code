@@ -280,23 +280,27 @@ function buildSessionStartHook() {
   const cliJs    = npmRoot ? `${npmRoot}/embedded-editor-for-claude-code/bin/cli.js` : null;
   const npxBin   = resolveBin("npx");
 
-  // Inline port derivation: same hash as derivePort() in paths.js — no file reads needed.
-  const derivePort = `var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))`;
+  // Single node invocation: compute port, write .claude/launch.json, print port.
+  // Writing launch.json here means the Preview pane shows "Embedded Editor" immediately
+  // (not "Set Up") — no need to wait for the MCP server or for Claude to run /editor-start.
+  const nb = nodeBin  ? nodeBin.replace(/'/g, "\\'")  : "node";
+  const cj = cliJs    ? cliJs.replace(/'/g, "\\'")     : "";
+  const setupAndPort = cj
+    ? `var fs=require('fs'),p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;var port=3100+(h%900);var f='.claude/launch.json';var c={version:'0.0.1',configurations:[]};try{c=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};if(!Array.isArray(c.configurations))c.configurations=[];var e={name:'Embedded Editor',runtimeExecutable:'${nb}',runtimeArgs:['${cj}','view',String(port)],port:port};var idx=c.configurations.findIndex(function(x){return x.name==='Embedded Editor'});if(idx>=0)c.configurations[idx]=e;else c.configurations.push(e);try{fs.mkdirSync('.claude',{recursive:true});fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')}catch(err){};process.stdout.write(String(port))`
+    : `var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))`;
 
   let serveCmd;
   if (nodeBin && cliJs) {
     serveCmd = `"${nodeBin}" "${cliJs}" view $PORT`;
   } else if (npxBin) {
-    // Fallback: npx with absolute path (slower but works)
     serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code view $PORT`;
   } else {
     serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" view $PORT`;
   }
   return {
     type: "command",
-    // Derive port from cwd hash so each project gets its own stable port (3100–3999).
-    // Start the viewer in the background only if that port is free.
-    command: `PORT=$(node -e "${derivePort}"); lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
+    // Derive port, write launch.json (so Preview pane is immediate), then start viewer.
+    command: `PORT=$(node -e "${setupAndPort}"); lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
   };
 }
 
