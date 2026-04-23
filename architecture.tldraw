@@ -1,64 +1,711 @@
 {
-  "seed": [
-    {
-      "type": "geo",
-      "x": 300, "y": 20,
-      "props": { "w": 220, "h": 60, "geo": "rectangle", "color": "blue", "fill": "solid", "size": "m", "font": "draw", "align": "middle", "verticalAlign": "middle" },
-      "text": "Claude Code"
+  "document": {
+    "store": {
+      "shape:3LYnKw57DF8rPazvXyZPY": {
+        "x": 20,
+        "y": 140,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:3LYnKw57DF8rPazvXyZPY",
+        "type": "geo",
+        "props": {
+          "w": 250,
+          "h": 270,
+          "geo": "rectangle",
+          "dash": "draw",
+          "growY": 29.265625,
+          "url": "",
+          "scale": 1,
+          "color": "green",
+          "labelColor": "black",
+          "fill": "semi",
+          "size": "s",
+          "font": "draw",
+          "align": "middle",
+          "verticalAlign": "middle",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "MCP Server"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "─────────"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "list_diagrams"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "create_diagram"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "read_diagram"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "write_diagram"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "append_elements"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "delete_diagram"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph"
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Render: exportToSvg"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "→ PNG inline in chat"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "parentId": "page:page",
+        "index": "a2bzal5l",
+        "typeName": "shape"
+      },
+      "shape:OHTPROTxueXg8OYgD8z0e": {
+        "x": 145,
+        "y": 410,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:OHTPROTxueXg8OYgD8z0e",
+        "type": "arrow",
+        "props": {
+          "kind": "arc",
+          "elbowMidPoint": 0.5,
+          "dash": "draw",
+          "size": "m",
+          "fill": "none",
+          "color": "grey",
+          "labelColor": "black",
+          "bend": 0,
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": 155,
+            "y": -125
+          },
+          "arrowheadStart": "none",
+          "arrowheadEnd": "arrow",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          },
+          "labelPosition": 0.5,
+          "font": "draw",
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "a8T5uuUG",
+        "typeName": "shape"
+      },
+      "shape:8KhYbaR6QtHgWgaOpp6ZM": {
+        "x": 300,
+        "y": 80,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:8KhYbaR6QtHgWgaOpp6ZM",
+        "type": "arrow",
+        "props": {
+          "kind": "arc",
+          "elbowMidPoint": 0.5,
+          "dash": "draw",
+          "size": "m",
+          "fill": "none",
+          "color": "grey",
+          "labelColor": "black",
+          "bend": 0,
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": -150,
+            "y": 60
+          },
+          "arrowheadStart": "none",
+          "arrowheadEnd": "arrow",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "stdio JSON-RPC"
+                  }
+                ]
+              }
+            ]
+          },
+          "labelPosition": 0.5,
+          "font": "draw",
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "a6XgEC7V",
+        "typeName": "shape"
+      },
+      "shape:q938DKTWmcRhqcL03Behp": {
+        "x": 420,
+        "y": 470,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:q938DKTWmcRhqcL03Behp",
+        "type": "geo",
+        "props": {
+          "w": 285,
+          "h": 90,
+          "geo": "rectangle",
+          "dash": "draw",
+          "growY": 14.890625,
+          "url": "",
+          "scale": 1,
+          "color": "violet",
+          "labelColor": "black",
+          "fill": "semi",
+          "size": "s",
+          "font": "draw",
+          "align": "middle",
+          "verticalAlign": "middle",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Browser Preview Pane"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Excalidraw · tldraw · Markdown"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "[[wikilinks]] · ![[embeds]]"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "parentId": "page:page",
+        "index": "a58K0wiV",
+        "typeName": "shape"
+      },
+      "shape:rihE_KpMohyAjvwZwGDou": {
+        "x": 655,
+        "y": 410,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:rihE_KpMohyAjvwZwGDou",
+        "type": "arrow",
+        "props": {
+          "kind": "arc",
+          "elbowMidPoint": 0.5,
+          "dash": "draw",
+          "size": "m",
+          "fill": "none",
+          "color": "grey",
+          "labelColor": "black",
+          "bend": 0,
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": -90,
+            "y": 60
+          },
+          "arrowheadStart": "none",
+          "arrowheadEnd": "arrow",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "HTTP + SSE"
+                  }
+                ]
+              }
+            ]
+          },
+          "labelPosition": 0.5,
+          "font": "draw",
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "aAUxxCkG",
+        "typeName": "shape"
+      },
+      "shape:xVCoDjcO3FgjMtSrTfJbQ": {
+        "x": 520,
+        "y": 80,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:xVCoDjcO3FgjMtSrTfJbQ",
+        "type": "arrow",
+        "props": {
+          "kind": "arc",
+          "elbowMidPoint": 0.5,
+          "dash": "draw",
+          "size": "m",
+          "fill": "none",
+          "color": "grey",
+          "labelColor": "black",
+          "bend": 0,
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": 130,
+            "y": 60
+          },
+          "arrowheadStart": "none",
+          "arrowheadEnd": "arrow",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "HTTP"
+                  }
+                ]
+              }
+            ]
+          },
+          "labelPosition": 0.5,
+          "font": "draw",
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "a7jAmDgV",
+        "typeName": "shape"
+      },
+      "page:page": {
+        "meta": {},
+        "id": "page:page",
+        "name": "Page 1",
+        "index": "a1",
+        "typeName": "page"
+      },
+      "document:document": {
+        "gridSize": 10,
+        "name": "",
+        "meta": {},
+        "id": "document:document",
+        "typeName": "document"
+      },
+      "shape:OECYkiU7u-lkHqAj76f57": {
+        "x": 198.34357193732194,
+        "y": -3.386306980056929,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:OECYkiU7u-lkHqAj76f57",
+        "type": "geo",
+        "props": {
+          "w": 220,
+          "h": 60,
+          "geo": "rectangle",
+          "dash": "draw",
+          "growY": 1.6953125,
+          "url": "",
+          "scale": 1,
+          "color": "blue",
+          "labelColor": "black",
+          "fill": "solid",
+          "size": "m",
+          "font": "draw",
+          "align": "middle",
+          "verticalAlign": "middle",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Claude Code"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "parentId": "page:page",
+        "index": "a1JM2fEV",
+        "typeName": "shape"
+      },
+      "shape:cQmjKPTOyU4km9Pn1vxGq": {
+        "x": 285,
+        "y": 195,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:cQmjKPTOyU4km9Pn1vxGq",
+        "type": "geo",
+        "props": {
+          "w": 230,
+          "h": 85,
+          "geo": "rectangle",
+          "dash": "draw",
+          "growY": 44.1875,
+          "url": "",
+          "scale": 1,
+          "color": "grey",
+          "labelColor": "black",
+          "fill": "semi",
+          "size": "s",
+          "font": "draw",
+          "align": "middle",
+          "verticalAlign": "middle",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "File Storage"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "(EXCALIDRAW_ROOT)"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "*.excalidraw  *.tldraw  *.md"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "parentId": "page:page",
+        "index": "a4FA229V",
+        "typeName": "shape"
+      },
+      "shape:xfuGeMmgZ4fUMQxjXJt3h": {
+        "x": 655,
+        "y": 410,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:xfuGeMmgZ4fUMQxjXJt3h",
+        "type": "arrow",
+        "props": {
+          "kind": "arc",
+          "elbowMidPoint": 0.5,
+          "dash": "draw",
+          "size": "m",
+          "fill": "none",
+          "color": "grey",
+          "labelColor": "black",
+          "bend": 0,
+          "start": {
+            "x": 0,
+            "y": 0
+          },
+          "end": {
+            "x": -155,
+            "y": -125
+          },
+          "arrowheadStart": "none",
+          "arrowheadEnd": "arrow",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph"
+              }
+            ]
+          },
+          "labelPosition": 0.5,
+          "font": "draw",
+          "scale": 1
+        },
+        "parentId": "page:page",
+        "index": "a9SEMaSV",
+        "typeName": "shape"
+      },
+      "shape:uGTyRYyobjfhNow3RcAgj": {
+        "x": 530,
+        "y": 140,
+        "rotation": 0,
+        "isLocked": false,
+        "opacity": 1,
+        "meta": {},
+        "id": "shape:uGTyRYyobjfhNow3RcAgj",
+        "type": "geo",
+        "props": {
+          "w": 250,
+          "h": 270,
+          "geo": "rectangle",
+          "dash": "draw",
+          "growY": 0,
+          "url": "",
+          "scale": 1,
+          "color": "orange",
+          "labelColor": "black",
+          "fill": "semi",
+          "size": "s",
+          "font": "draw",
+          "align": "middle",
+          "verticalAlign": "middle",
+          "richText": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Viewer Server :3000"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "─────────"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "GET /api/diagrams"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "GET /api/notes"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "PUT /api/diagram/:name"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "GET /api/svg  /api/png"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "GET /api/history/:name"
+                  }
+                ]
+              },
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "GET /events (SSE)"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "parentId": "page:page",
+        "index": "a3cMLhsV",
+        "typeName": "shape"
+      }
     },
-    {
-      "type": "geo",
-      "x": 20, "y": 140,
-      "props": { "w": 250, "h": 270, "geo": "rectangle", "color": "green", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
-      "text": "MCP Server\n─────────\nlist_diagrams\ncreate_diagram\nread_diagram\nwrite_diagram\nappend_elements\ndelete_diagram\n\nRender: exportToSvg\n→ PNG inline in chat"
-    },
-    {
-      "type": "geo",
-      "x": 530, "y": 140,
-      "props": { "w": 250, "h": 270, "geo": "rectangle", "color": "orange", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
-      "text": "Viewer Server :3000\n─────────\nGET /api/diagrams\nGET /api/notes\nPUT /api/diagram/:name\nGET /api/svg  /api/png\nGET /api/history/:name\nGET /events (SSE)"
-    },
-    {
-      "type": "geo",
-      "x": 285, "y": 195,
-      "props": { "w": 230, "h": 85, "geo": "rectangle", "color": "grey", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
-      "text": "File Storage\n(EXCALIDRAW_ROOT)\n*.excalidraw  *.tldraw  *.md"
-    },
-    {
-      "type": "geo",
-      "x": 420, "y": 470,
-      "props": { "w": 285, "h": 90, "geo": "rectangle", "color": "violet", "fill": "semi", "size": "s", "font": "draw", "align": "middle", "verticalAlign": "middle" },
-      "text": "Browser Preview Pane\nExcalidraw · tldraw · Markdown\n[[wikilinks]] · ![[embeds]]"
-    },
-    {
-      "type": "arrow",
-      "x": 300, "y": 80,
-      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -150, "y": 60 } },
-      "text": "stdio JSON-RPC"
-    },
-    {
-      "type": "arrow",
-      "x": 520, "y": 80,
-      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": 130, "y": 60 } },
-      "text": "HTTP"
-    },
-    {
-      "type": "arrow",
-      "x": 145, "y": 410,
-      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": 155, "y": -125 } },
-      "text": ""
-    },
-    {
-      "type": "arrow",
-      "x": 655, "y": 410,
-      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -155, "y": -125 } },
-      "text": ""
-    },
-    {
-      "type": "arrow",
-      "x": 655, "y": 410,
-      "props": { "color": "grey", "size": "m", "arrowheadStart": "none", "arrowheadEnd": "arrow", "start": { "x": 0, "y": 0 }, "end": { "x": -90, "y": 60 } },
-      "text": "HTTP + SSE"
+    "schema": {
+      "schemaVersion": 2,
+      "sequences": {
+        "com.tldraw.store": 5,
+        "com.tldraw.asset": 1,
+        "com.tldraw.camera": 1,
+        "com.tldraw.document": 2,
+        "com.tldraw.instance": 26,
+        "com.tldraw.instance_page_state": 5,
+        "com.tldraw.page": 1,
+        "com.tldraw.instance_presence": 6,
+        "com.tldraw.pointer": 1,
+        "com.tldraw.shape": 4,
+        "com.tldraw.asset.bookmark": 2,
+        "com.tldraw.asset.image": 6,
+        "com.tldraw.asset.video": 5,
+        "com.tldraw.shape.group": 0,
+        "com.tldraw.shape.text": 4,
+        "com.tldraw.shape.bookmark": 2,
+        "com.tldraw.shape.draw": 4,
+        "com.tldraw.shape.geo": 11,
+        "com.tldraw.shape.note": 10,
+        "com.tldraw.shape.line": 5,
+        "com.tldraw.shape.frame": 1,
+        "com.tldraw.shape.arrow": 8,
+        "com.tldraw.shape.highlight": 3,
+        "com.tldraw.shape.embed": 4,
+        "com.tldraw.shape.image": 5,
+        "com.tldraw.shape.video": 4,
+        "com.tldraw.binding.arrow": 1
+      }
     }
-  ]
+  },
+  "session": {
+    "version": 0,
+    "currentPageId": "page:page",
+    "exportBackground": true,
+    "isFocusMode": false,
+    "isDebugMode": false,
+    "isToolLocked": false,
+    "isGridMode": false,
+    "pageStates": [
+      {
+        "pageId": "page:page",
+        "camera": {
+          "x": 118.57549857549859,
+          "y": 447.39799234330485,
+          "z": 0.4618421052631579
+        },
+        "selectedShapeIds": [
+          "shape:OECYkiU7u-lkHqAj76f57"
+        ],
+        "focusedGroupId": null
+      }
+    ]
+  }
 }
