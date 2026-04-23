@@ -1,6 +1,6 @@
 {
   "name": "embedded-editor-for-claude-code",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Embedded visual workspace for Claude Code — Excalidraw diagrams (with MCP tools + inline PNG), tldraw canvases, and Markdown notes, all linked by wikilinks",
   "license": "MIT",
   "author": {

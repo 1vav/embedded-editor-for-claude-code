@@ -280,27 +280,37 @@ function buildSessionStartHook() {
   const cliJs    = npmRoot ? `${npmRoot}/embedded-editor-for-claude-code/bin/cli.js` : null;
   const npxBin   = resolveBin("npx");
 
-  // Single node invocation: compute port, write .claude/launch.json, print port.
-  // Writing launch.json here means the Preview pane shows "Embedded Editor" immediately
-  // (not "Set Up") — no need to wait for the MCP server or for Claude to run /editor-start.
-  const nb = nodeBin  ? nodeBin.replace(/'/g, "\\'")  : "node";
-  const cj = cliJs    ? cliJs.replace(/'/g, "\\'")     : "";
-  const setupAndPort = cj
-    ? `var fs=require('fs'),p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;var port=3100+(h%900);var f='.claude/launch.json';var c={version:'0.0.1',configurations:[]};try{c=JSON.parse(fs.readFileSync(f,'utf8'))}catch(e){};if(!Array.isArray(c.configurations))c.configurations=[];var e={name:'Embedded Editor',runtimeExecutable:'${nb}',runtimeArgs:['${cj}','view',String(port)],port:port};var idx=c.configurations.findIndex(function(x){return x.name==='Embedded Editor'});if(idx>=0)c.configurations[idx]=e;else c.configurations.push(e);try{fs.mkdirSync('.claude',{recursive:true});fs.writeFileSync(f,JSON.stringify(c,null,2)+'\\n')}catch(err){};process.stdout.write(String(port))`
-    : `var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))`;
+  // Two separate inline scripts — no paths embedded in JS strings (avoids escaping issues).
+  // cliJs is passed as a shell argument ($2) so it never needs quote-escaping inside JS.
+  // Uses absolute nodeBin for both steps — hook shells don't source nvm/homebrew PATH.
+  const nodeExec = nodeBin ? `"${nodeBin}"` : "node";
+
+  // Step A: compute port from cwd hash; print it.
+  const portScript = `var p=process.cwd(),h=0;for(var i=0;i<p.length;i++)h=(h*31+p.charCodeAt(i))>>>0;process.stdout.write(String(3100+(h%900)))`;
+
+  // Step B: write .claude/launch.json using cliJs+port passed as argv — no string embedding.
+  // process.execPath = node binary; process.argv[2] = cliJs; process.argv[3] = port string.
+  const writeScript = cliJs
+    ? `var fs=require("fs"),cj=process.argv[2],port=parseInt(process.argv[3]),nb=process.execPath;var f=".claude/launch.json";var c={version:"0.0.1",configurations:[]};try{c=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){};if(!Array.isArray(c.configurations))c.configurations=[];var e={name:"Embedded Editor",runtimeExecutable:nb,runtimeArgs:[cj,"view",String(port)],port:port};var idx=c.configurations.findIndex(function(x){return x.name==="Embedded Editor"});if(idx>=0)c.configurations[idx]=e;else c.configurations.push(e);try{fs.mkdirSync(".claude",{recursive:true});fs.writeFileSync(f,JSON.stringify(c,null,2)+String.fromCharCode(10))}catch(err){}`
+    : null;
 
   let serveCmd;
   if (nodeBin && cliJs) {
-    serveCmd = `"${nodeBin}" "${cliJs}" view $PORT`;
+    serveCmd = `${nodeExec} "${cliJs}" view "$PORT"`;
   } else if (npxBin) {
-    serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code view $PORT`;
+    serveCmd = `"${npxBin}" --yes --prefer-offline embedded-editor-for-claude-code view "$PORT"`;
   } else {
-    serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" view $PORT`;
+    serveCmd = `node "$(npm root -g)/embedded-editor-for-claude-code/bin/cli.js" view "$PORT"`;
   }
+
+  const writePart = writeScript
+    ? `${nodeExec} -e "${writeScript}" -- "${cliJs}" "$PORT" 2>/dev/null; `
+    : "";
+
   return {
     type: "command",
-    // Derive port, write launch.json (so Preview pane is immediate), then start viewer.
-    command: `PORT=$(node -e "${setupAndPort}"); lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
+    // Compute port, write launch.json (instant Preview pane), then start viewer if needed.
+    command: `PORT=$(${nodeExec} -e "${portScript}"); ${writePart}lsof -ti:$PORT > /dev/null 2>&1 || ${serveCmd} > /tmp/embedded-editor.log 2>&1 &`,
   };
 }
 
