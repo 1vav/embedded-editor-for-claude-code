@@ -50,7 +50,7 @@ npx embedded-editor-for-claude-code init
 ### Update to latest version
 
 ```sh
-npm update -g embedded-editor-for-claude-code
+npx embedded-editor-for-claude-code@latest init --global
 ```
 
 > Re-run `init` after upgrading to refresh the API reference in `CLAUDE.md`.
