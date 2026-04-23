@@ -94,19 +94,20 @@ function makeEditorTheme(T) {
   }, { dark: T.isDark });
 }
 
-function makeNoteEditorTheme(T) {
+function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
+  const N = C ? { ...T, ...C } : T;
   return EditorView.theme({
-    "&":            { height: "100%", background: T.surface, color: T.text },
-    ".cm-scroller": { fontFamily: T.noteFont, fontSize: "15px", lineHeight: "1.75", overflow: "auto" },
-    ".cm-content":  { caretColor: T.accent, padding: "28px 32px 60px", maxWidth: "720px", margin: "0 auto", boxSizing: "content-box", fontFamily: T.noteFont },
+    "&":            { height: "100%", background: N.surface, color: N.text },
+    ".cm-scroller": { fontFamily: S.noteFont, fontSize: S.fontSize, lineHeight: S.lineHeight, overflow: "auto" },
+    ".cm-content":  { caretColor: N.accent, padding: "28px 32px 60px", maxWidth: S.maxWidth, margin: "0 auto", boxSizing: "content-box", fontFamily: S.noteFont },
     ".cm-line":     { padding: "0" },
-    ".cm-activeLine":   { background: T.surface2 + "40" },
-    ".cm-selectionBackground, ::selection": { background: T.accent + "30 !important" },
-    ".cm-cursor":   { borderLeftColor: T.accent },
+    ".cm-activeLine":   { background: N.surface2 + "40" },
+    ".cm-selectionBackground, ::selection": { background: N.accent + "30 !important" },
+    ".cm-cursor":   { borderLeftColor: N.accent },
     ".cm-focused":  { outline: "none" },
-    ".cm-panels":   { background: T.surface, borderTop: `1px solid ${T.border}` },
-    ".cm-panels input":  { background: T.surface2, border: `1px solid ${T.border2}`, color: T.text, borderRadius: 4, padding: "2px 6px", fontFamily: T.mono, fontSize: 11 },
-    ".cm-panels button": { background: T.surface3, border: `1px solid ${T.border2}`, color: T.textDim, borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 11 },
+    ".cm-panels":   { background: N.surface, borderTop: `1px solid ${N.border}` },
+    ".cm-panels input":  { background: N.surface2, border: `1px solid ${N.border2}`, color: N.text, borderRadius: 4, padding: "2px 6px", fontFamily: T.mono, fontSize: 11 },
+    ".cm-panels button": { background: N.surface3, border: `1px solid ${N.border2}`, color: N.textDim, borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: T.mono, fontSize: 11 },
     // Live preview decoration styles
     ".cm-md-hidden":   { fontSize: "0", lineHeight: "0" },
     ".cm-md-h1":       { fontSize: "1.4em", fontWeight: "700" },
@@ -118,18 +119,18 @@ function makeNoteEditorTheme(T) {
     ".cm-md-bold":     { fontWeight: "bold" },
     ".cm-md-italic":   { fontStyle: "italic" },
     ".cm-md-strike":   { textDecoration: "line-through" },
-    ".cm-md-code":     { fontFamily: T.mono, background: T.surface2 + "aa", borderRadius: "3px", padding: "0 3px", fontSize: "0.88em" },
-    ".cm-md-link":     { color: T.blue },
-    ".cm-md-wikilink": { color: T.blue, cursor: "pointer" },
-    ".cm-md-hr":       { display: "block", borderTop: `1px solid ${T.border}`, margin: "0.5em 0", height: "0", width: "100%" },
+    ".cm-md-code":     { fontFamily: T.mono, background: N.surface2 + "aa", borderRadius: "3px", padding: "0 3px", fontSize: "0.88em" },
+    ".cm-md-link":     { color: N.blue },
+    ".cm-md-wikilink": { color: N.blue, cursor: "pointer" },
+    ".cm-md-hr":       { display: "block", borderTop: `1px solid ${N.border}`, margin: "0.5em 0", height: "0", width: "100%" },
     // Slash-command autocomplete popup
-    ".cm-tooltip":                                    { background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", boxShadow: "0 8px 28px rgba(0,0,0,.45)", overflow: "hidden", padding: "3px 0" },
+    ".cm-tooltip":                                    { background: N.surface, border: `1px solid ${N.border2}`, borderRadius: "8px", boxShadow: "0 8px 28px rgba(0,0,0,.45)", overflow: "hidden", padding: "3px 0" },
     ".cm-tooltip-autocomplete ul":                    { fontFamily: T.mono, margin: 0, padding: 0, listStyle: "none" },
     ".cm-tooltip-autocomplete ul li":                 { padding: "6px 14px", display: "flex", alignItems: "baseline", gap: "10px", cursor: "pointer" },
-    ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: T.surface3 },
-    ".cm-completionLabel":                            { flex: "1", color: T.text, fontSize: "12px" },
-    ".cm-completionDetail":                           { color: T.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
-  }, { dark: T.isDark });
+    ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: N.surface3 },
+    ".cm-completionLabel":                            { flex: "1", color: N.text, fontSize: "12px" },
+    ".cm-completionDetail":                           { color: N.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
+  }, { dark: N.isDark });
 }
 
 // ─── CM6 Markdown Live Preview ────────────────────────────────────────────────
@@ -338,6 +339,44 @@ function esc(s) { return String(s).replace(/"/g, "&quot;"); }
 const MONO      = "'JetBrains Mono','SF Mono','Cascadia Code',Menlo,monospace";
 const NOTE_FONT = "ui-serif,Georgia,'Times New Roman',serif";
 
+const NOTE_STYLES = [
+  { id: "serif",    label: "Serif",    noteFont: NOTE_FONT,
+    fontSize: "15px", lineHeight: "1.75", maxWidth: "720px", h1Border: true,  letterSpacing: null },
+  { id: "sans",     label: "Sans",     noteFont: "ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+    fontSize: "15px", lineHeight: "1.65", maxWidth: "720px", h1Border: false, letterSpacing: null },
+  { id: "literary", label: "Literary", noteFont: "'Palatino Linotype',Palatino,'Book Antiqua',Georgia,serif",
+    fontSize: "17px", lineHeight: "1.9",  maxWidth: "660px", h1Border: false, letterSpacing: "0.01em" },
+  { id: "compact",  label: "Compact",  noteFont: "ui-sans-serif,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif",
+    fontSize: "13px", lineHeight: "1.55", maxWidth: "800px", h1Border: true,  letterSpacing: null },
+  { id: "mono",     label: "Mono",     noteFont: MONO,
+    fontSize: "13px", lineHeight: "1.7",  maxWidth: "800px", h1Border: false, letterSpacing: null },
+];
+
+// null colors = follow the global app theme (DARK/LIGHT)
+const NOTE_COLOR_PROFILES = [
+  { id: "auto",   label: "Auto",   swatch: null, colors: null },
+  { id: "sepia",  label: "Sepia",  swatch: "#c8a97e",
+    colors: { bg: "#f8f1e4", surface: "#f2e8d5", surface2: "#e8dcc8", surface3: "#ddd0b8",
+              text: "#3d2b1f", textDim: "#7a6250", muted: "#a08878", muted2: "#c8b09a",
+              blue: "#8b5e3c", orange: "#c4651a", accent: "#9b7a4a",
+              border: "#ddd0bd", border2: "#c8b89a", isDark: false } },
+  { id: "paper",  label: "Paper",  swatch: "#1a1a1a",
+    colors: { bg: "#ffffff", surface: "#f5f5f5", surface2: "#ebebeb", surface3: "#e0e0e0",
+              text: "#0a0a0a", textDim: "#3a3a3a", muted: "#787878", muted2: "#c0c0c0",
+              blue: "#0000cc", orange: "#880000", accent: "#000000",
+              border: "#d8d8d8", border2: "#c0c0c0", isDark: false } },
+  { id: "night",  label: "Night",  swatch: "#4a9eff",
+    colors: { bg: "#0a0f1e", surface: "#101828", surface2: "#162034", surface3: "#1e2a40",
+              text: "#c8d8f0", textDim: "#8090b0", muted: "#4a5a78", muted2: "#2a3550",
+              blue: "#4a9eff", orange: "#ff9040", accent: "#4aefb0",
+              border: "#1e2a40", border2: "#283850", isDark: true } },
+  { id: "forest", label: "Forest", swatch: "#70b86a",
+    colors: { bg: "#161c12", surface: "#1c2418", surface2: "#232c1e", surface3: "#2a3524",
+              text: "#c4d8b0", textDim: "#8aaa78", muted: "#506840", muted2: "#304828",
+              blue: "#70b86a", orange: "#c8a040", accent: "#90d870",
+              border: "#2a3524", border2: "#384830", isDark: true } },
+];
+
 const DARK = {
   bg: "#0d0d0d", surface: "#141414", surface2: "#1a1a1a", surface3: "#212121",
   border: "#252525", border2: "#313131",
@@ -464,20 +503,146 @@ function Btn({ children, onClick, accent, small, disabled, title }) {
   );
 }
 
-function Ghost({ children, onClick, active, title, danger }) {
+function Ghost({ children, onClick, active, title, danger, pref }) {
   const T = useT();
   const [h, sH] = useState(false);
+  // pref=true: preference/secondary controls — visually receded vs. mode buttons
+  const bg    = pref
+    ? (active ? T.surface2 : h ? T.surface : "transparent")
+    : (active ? T.surface3 : h ? T.surface2 : "transparent");
+  const bdr   = pref
+    ? `1px solid ${active ? T.border : "transparent"}`
+    : `1px solid ${active ? T.border2 : "transparent"}`;
+  const color = danger ? T.red
+    : pref  ? (active ? T.muted : h ? T.muted : T.muted2)
+    : (active ? T.text : h ? T.textDim : T.muted);
   return (
     <button onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} title={title} style={{
-      background: active ? T.surface3 : h ? T.surface2 : "transparent",
-      border: `1px solid ${active ? T.border2 : "transparent"}`,
-      color: danger ? T.red : active ? T.text : h ? T.textDim : T.muted,
+      background: bg, border: bdr, color,
       borderRadius: 5, padding: "3px 7px", cursor: "pointer",
       fontFamily: T.mono, fontSize: 12, transition: "all .1s",
       display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
     }}>
       {children}
     </button>
+  );
+}
+
+// ─── Style Picker ─────────────────────────────────────────────────────────────
+
+function StylePicker({ styleId, onChange }) {
+  const T = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const current = NOTE_STYLES.find(s => s.id === styleId) ?? NOTE_STYLES[0];
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <Ghost onClick={() => setOpen(o => !o)} active={open} title="Reading style" pref>
+        Aa · {current.label}
+      </Ghost>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
+          background: T.surface, border: `1px solid ${T.border2}`, borderRadius: 8,
+          boxShadow: T.isDark ? "0 6px 24px rgba(0,0,0,.6)" : "0 6px 24px rgba(0,0,0,.15)",
+          overflow: "hidden", zIndex: 200, minWidth: 180,
+        }}>
+          {NOTE_STYLES.map(s => {
+            const active = s.id === styleId;
+            return (
+              <div key={s.id} onClick={() => { onChange(s.id); setOpen(false); }}
+                style={{
+                  padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                  background: active ? T.surface2 : "transparent",
+                  borderBottom: `1px solid ${T.border}`,
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.surface3; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              >
+                <span style={{ fontFamily: s.noteFont, fontSize: 15, color: T.text, lineHeight: 1, flexShrink: 0, width: 18 }}>Aa</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, color: active ? T.text : T.textDim, fontWeight: active ? 700 : 400 }}>{s.label}</div>
+                  <div style={{ fontFamily: T.mono, fontSize: 9, color: T.muted, marginTop: 1 }}>{s.fontSize} · {s.lineHeight}lh</div>
+                </div>
+                {active && <span style={{ color: T.accent, fontSize: 11 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Color Picker ─────────────────────────────────────────────────────────────
+
+function ColorPicker({ colorId, onChange }) {
+  const T = useT();
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  const current = NOTE_COLOR_PROFILES.find(p => p.id === colorId) ?? NOTE_COLOR_PROFILES[0];
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <Ghost onClick={() => setOpen(o => !o)} active={open} title="Color profile" pref>
+        <span style={{
+          display: "inline-block", width: 8, height: 8, borderRadius: "50%",
+          background: current.swatch ?? (T.isDark ? "#555" : "#aaa"),
+          border: `1px solid ${T.border2}`, flexShrink: 0,
+        }} />
+        {current.label}
+      </Ghost>
+      {open && (
+        <div style={{
+          position: "absolute", top: "calc(100% + 6px)", left: "50%", transform: "translateX(-50%)",
+          background: T.surface, border: `1px solid ${T.border2}`, borderRadius: 8,
+          boxShadow: T.isDark ? "0 6px 24px rgba(0,0,0,.6)" : "0 6px 24px rgba(0,0,0,.15)",
+          overflow: "hidden", zIndex: 200, minWidth: 160,
+        }}>
+          {NOTE_COLOR_PROFILES.map(p => {
+            const active = p.id === colorId;
+            return (
+              <div key={p.id} onClick={() => { onChange(p.id); setOpen(false); }}
+                style={{
+                  padding: "9px 14px", cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                  background: active ? T.surface2 : "transparent",
+                  borderBottom: `1px solid ${T.border}`,
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = T.surface3; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+              >
+                <span style={{
+                  display: "inline-block", width: 12, height: 12, borderRadius: "50%", flexShrink: 0,
+                  background: p.swatch ?? (T.isDark ? "#444" : "#ccc"),
+                  border: `1px solid ${T.border2}`,
+                }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: T.mono, fontSize: 11, color: active ? T.text : T.textDim, fontWeight: active ? 700 : 400 }}>{p.label}</div>
+                </div>
+                {active && <span style={{ color: T.accent, fontSize: 11 }}>✓</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1254,6 +1419,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [blinks,    setBlinks]    = useState([]);
   const [showBL,    setShowBL]    = useState(false);
   const [dropPopup, setDropPopup] = useState(null);   // { file, x, y, pos }
+  const [styleId,   setStyleId]   = useState(() => localStorage.getItem("ee-note-style") ?? "serif");
+  const [colorId,   setColorId]   = useState(() => localStorage.getItem("ee-note-color") ?? "auto");
+  const S = NOTE_STYLES.find(s => s.id === styleId) ?? NOTE_STYLES[0];
+  const CP = NOTE_COLOR_PROFILES.find(p => p.id === colorId) ?? NOTE_COLOR_PROFILES[0];
+  const C = CP.colors;
   const scrollRef      = useRef(null);  // preview scroll div
   const cmContainerRef = useRef(null);  // CM6 mount point
   const cmViewRef      = useRef(null);  // CM6 EditorView instance
@@ -1331,7 +1501,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
           // "/" is not a word char so activateOnTyping won't fire for it.
           // slashExt is defined above useEffect to avoid inline-function scope issues.
           slashExt,
-          noteThemeComp.current.of(makeNoteEditorTheme(T)),
+          noteThemeComp.current.of(makeNoteEditorTheme(T, S, C)),
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return;
             const newText = update.state.doc.toString();
@@ -1367,8 +1537,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
   // Live-update note editor theme without recreating
   useEffect(() => {
     if (!cmViewRef.current) return;
-    cmViewRef.current.dispatch({ effects: noteThemeComp.current.reconfigure(makeNoteEditorTheme(T)) });
-  }, [T]);
+    cmViewRef.current.dispatch({ effects: noteThemeComp.current.reconfigure(makeNoteEditorTheme(T, S, C)) });
+  }, [T, S, C]);
 
   const switchMode = useCallback((newMode) => {
     if (newMode === mode) return;
@@ -1457,7 +1627,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
   }, [dropPopup]);
 
   const segs       = useMemo(() => parseSegments(raw), [raw]);
-  const noteStyles = useMemo(() => makeNoteStyles(T), [T]);
+  const noteStyles = useMemo(() => makeNoteStyles(T, S, C), [T, S, C]);
+  const N = C ? { ...T, ...C } : T;
 
   if (loading) return (
     <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
@@ -1465,12 +1636,21 @@ function NoteView({ name, onNavigate, onUserSave }) {
   );
 
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: T.bg }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: N.bg }}>
       {/* Note toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px",
-        borderBottom: `1px solid ${T.border}`, flexShrink: 0 }}>
+        borderBottom: `1px solid ${T.border}`, flexShrink: 0, background: T.bg }}>
         <Ghost onClick={() => switchMode("preview")} active={mode === "preview"} small>preview</Ghost>
         <Ghost onClick={() => switchMode("edit")} active={mode === "edit"} small>edit</Ghost>
+        <div style={{ flex: 1 }} />
+        <StylePicker styleId={styleId} onChange={(id) => {
+          setStyleId(id);
+          localStorage.setItem("ee-note-style", id);
+        }} />
+        <ColorPicker colorId={colorId} onChange={(id) => {
+          setColorId(id);
+          localStorage.setItem("ee-note-color", id);
+        }} />
         <div style={{ flex: 1 }} />
         {blinks.length > 0 && (
           <Ghost onClick={() => setShowBL(b => !b)} active={showBL} title="Backlinks">
@@ -1676,34 +1856,36 @@ function CodeEditor({ name, onUserSave }) {
 }
 
 // CSS for note body content — called with the current theme object
-function makeNoteStyles(T) { return `
-  .note-body { color: ${T.text}; font-family: ${T.noteFont}; font-size: 15px; line-height: 1.75; }
-  .note-body h1,.note-body h2,.note-body h3 { font-family: ${T.noteFont}; color: ${T.text}; font-weight: 700; }
-  .note-body h1 { font-size: 1.4em; margin: 1.33em 0 .29em; border-bottom: 1px solid ${T.border}; padding-bottom: .4em; }
+function makeNoteStyles(T, S = NOTE_STYLES[0], C = null) {
+  const N = C ? { ...T, ...C } : T;
+  return `
+  .note-body { color: ${N.text}; font-family: ${S.noteFont}; font-size: ${S.fontSize}; line-height: ${S.lineHeight}; ${S.letterSpacing ? `letter-spacing: ${S.letterSpacing};` : ""} }
+  .note-body h1,.note-body h2,.note-body h3 { font-family: ${S.noteFont}; color: ${N.text}; font-weight: 700; }
+  .note-body h1 { font-size: 1.4em; margin: 1.33em 0 .29em; ${S.h1Border ? `border-bottom: 1px solid ${N.border}; padding-bottom: .4em;` : ""} }
   .note-body h2 { font-size: 1.15em; margin: 1.16em 0 .29em; }
   .note-body h3 { font-size: 1em; margin: .93em 0 .27em; opacity: 0.8; }
   .note-body p { margin: .8em 0; }
-  .note-body a[data-wl] { color: ${T.blue}; text-decoration: none; border-bottom: 1px solid ${T.blue}44; cursor: pointer; }
-  .note-body a[data-wl]:hover { border-bottom-color: ${T.blue}; }
-  .note-body a { color: ${T.blue}; }
-  .note-body code { font-family: ${T.mono}; font-size: .85em; background: ${T.surface2}; padding: .15em .35em; border-radius: 3px; color: ${T.orange}; }
-  .note-body pre { background: ${T.surface2}; border: 1px solid ${T.border}; border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 1em 0; }
-  .note-body pre code { background: none; padding: 0; color: ${T.text}; font-size: 12px; }
+  .note-body a[data-wl] { color: ${N.blue}; text-decoration: none; border-bottom: 1px solid ${N.blue}44; cursor: pointer; }
+  .note-body a[data-wl]:hover { border-bottom-color: ${N.blue}; }
+  .note-body a { color: ${N.blue}; }
+  .note-body code { font-family: ${T.mono}; font-size: .85em; background: ${N.surface2}; padding: .15em .35em; border-radius: 3px; color: ${N.orange}; }
+  .note-body pre { background: ${N.surface2}; border: 1px solid ${N.border}; border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 1em 0; }
+  .note-body pre code { background: none; padding: 0; color: ${N.text}; font-size: 12px; }
   .note-body .code-block { position: relative; }
-  .note-body .copy-btn { position: absolute; top: 8px; right: 8px; opacity: 0.35; transition: opacity .15s; background: ${T.surface3}; border: 1px solid ${T.border2}; color: ${T.textDim}; font-family: ${T.mono}; font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+  .note-body .copy-btn { position: absolute; top: 8px; right: 8px; opacity: 0.35; transition: opacity .15s; background: ${N.surface3}; border: 1px solid ${N.border2}; color: ${N.textDim}; font-family: ${T.mono}; font-size: 10px; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
   .note-body .code-block:hover .copy-btn, .note-body .copy-btn:focus { opacity: 1; }
-  .note-body .copy-btn:hover { color: ${T.text}; border-color: ${T.muted}; }
-  .note-body blockquote { border-left: 3px solid ${T.border2}; margin: 0; padding: .1em 0 .1em 1em; color: ${T.textDim}; }
+  .note-body .copy-btn:hover { color: ${N.text}; border-color: ${N.muted}; }
+  .note-body blockquote { border-left: 3px solid ${N.border2}; margin: 0; padding: .1em 0 .1em 1em; color: ${N.textDim}; }
   .note-body ul,.note-body ol { padding-left: 1.5em; margin: .5em 0; }
   .note-body li { margin: .3em 0; }
   .note-body table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-  .note-body th,.note-body td { border: 1px solid ${T.border2}; padding: 6px 10px; font-size: 13px; }
-  .note-body th { background: ${T.surface2}; font-family: ${T.mono}; font-size: 11px; }
-  .note-body hr { border: none; border-top: 1px solid ${T.border}; margin: 1.5em 0; }
+  .note-body th,.note-body td { border: 1px solid ${N.border2}; padding: 6px 10px; font-size: 13px; }
+  .note-body th { background: ${N.surface2}; font-family: ${T.mono}; font-size: 11px; }
+  .note-body hr { border: none; border-top: 1px solid ${N.border}; margin: 1.5em 0; }
   .note-body img { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.75em 0; }
   .note-body video { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.75em 0; }
   .note-body audio { width: 100%; margin: 0.75em 0; display: block; }
-  .note-body del { color: ${T.muted}; }
+  .note-body del { color: ${N.muted}; }
   .note-body input[type="checkbox"] { margin-right: 5px; }
 `;}
 
