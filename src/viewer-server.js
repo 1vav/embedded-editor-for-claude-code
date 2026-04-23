@@ -303,8 +303,7 @@ function appHtml() {
 // ── Server ────────────────────────────────────────────────────────────────────
 
 export async function startViewerServer(port = DEFAULT_PORT) {
-  // Pre-load vendor assets into memory at startup.
-  // Also check for pre-compressed (.gz / .br) variants produced by the build script.
+  // Vendor asset map — populated by the background preload below.
   const vendorFiles = new Map(); // basename → { buf, ct, gz?, br? }
   const MIME = (ext) =>
     ext === ".js"    ? "application/javascript; charset=utf-8"
@@ -313,30 +312,35 @@ export async function startViewerServer(port = DEFAULT_PORT) {
     : ext === ".woff"  ? "font/woff"
     : "application/octet-stream";
 
-  try {
-    const entries = await fs.readdir(VENDOR_DIR);
-    // First pass: index which compressed variants exist
-    const gzSet = new Set(entries.filter(f => f.endsWith(".gz")).map(f => f.slice(0, -3)));
-    const brSet = new Set(entries.filter(f => f.endsWith(".br")).map(f => f.slice(0, -3)));
-    // Second pass: load uncompressed files (and compressed variants if present)
-    await Promise.all(
-      entries
-        .filter(f => !f.endsWith(".gz") && !f.endsWith(".br"))
-        .map(async f => {
-          try {
-            const ext = path.extname(f);
-            const [buf, gz, br] = await Promise.all([
-              fs.readFile(path.join(VENDOR_DIR, f)),
-              gzSet.has(f) ? fs.readFile(path.join(VENDOR_DIR, f + ".gz")) : Promise.resolve(null),
-              brSet.has(f) ? fs.readFile(path.join(VENDOR_DIR, f + ".br")) : Promise.resolve(null),
-            ]);
-            vendorFiles.set(f, { buf, ct: MIME(ext), gz, br });
-          } catch {}
-        })
-    );
-  } catch (e) {
-    process.stderr.write(`[embedded-editor] vendor preload failed: ${e.message}\n`);
-  }
+  // Kick off vendor preload in the background — do NOT await here so the HTTP
+  // server can start listening immediately (~49 MB of files was the bottleneck).
+  // The vendor request handler awaits this promise on first hit.
+  const vendorReady = (async () => {
+    try {
+      const entries = await fs.readdir(VENDOR_DIR);
+      // First pass: index which compressed variants exist
+      const gzSet = new Set(entries.filter(f => f.endsWith(".gz")).map(f => f.slice(0, -3)));
+      const brSet = new Set(entries.filter(f => f.endsWith(".br")).map(f => f.slice(0, -3)));
+      // Second pass: load uncompressed files (and compressed variants if present)
+      await Promise.all(
+        entries
+          .filter(f => !f.endsWith(".gz") && !f.endsWith(".br"))
+          .map(async f => {
+            try {
+              const ext = path.extname(f);
+              const [buf, gz, br] = await Promise.all([
+                fs.readFile(path.join(VENDOR_DIR, f)),
+                gzSet.has(f) ? fs.readFile(path.join(VENDOR_DIR, f + ".gz")) : Promise.resolve(null),
+                brSet.has(f) ? fs.readFile(path.join(VENDOR_DIR, f + ".br")) : Promise.resolve(null),
+              ]);
+              vendorFiles.set(f, { buf, ct: MIME(ext), gz, br });
+            } catch {}
+          })
+      );
+    } catch (e) {
+      process.stderr.write(`[embedded-editor] vendor preload failed: ${e.message}\n`);
+    }
+  })();
 
   const server = http.createServer(async (req, res) => {
     // #013: per-request timeout — prevents slow bodies from stalling the server
@@ -390,6 +394,9 @@ export async function startViewerServer(port = DEFAULT_PORT) {
       // Served from the pre-loaded in-memory Map; supports Content-Encoding for
       // .gz/.br variants produced by the build script.
       if (pathname.startsWith("/vendor/")) {
+        // Wait for background preload to finish (instant on subsequent requests
+        // once the Map is populated; only the very first request(s) may wait).
+        await vendorReady;
         const basename = pathname.slice("/vendor/".length);
         // Guard: no path traversal
         if (basename.includes("..") || basename.includes("/")) {
