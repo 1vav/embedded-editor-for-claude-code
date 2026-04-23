@@ -99,6 +99,11 @@ try {
     debounces.set(filename, setTimeout(() => {
       debounces.delete(filename); // #006 fix: avoid unbounded Map growth
       broadcast(event, { name });
+      // Touch recent for diagram/note/tldraw so MCP-created files appear in
+      // the recent list even though they never go through the HTTP API.
+      if      (event === "diagram:changed") touchRecent(name, "diagram");
+      else if (event === "tldraw:changed")  touchRecent(name, "tldraw");
+      else if (event === "note:changed")    touchRecent(name, "note");
     }, 120));
   });
 } catch (e) {
