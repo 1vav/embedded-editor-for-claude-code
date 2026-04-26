@@ -58,7 +58,7 @@ export async function rewriteLinks(oldName, newName) {
       const text = await fs.readFile(fp, "utf8");
       let changed = false;
       const newText = text.replace(
-        /(!?\[\[)([^\]|]+?)(\.(md|excalidraw))?(\|[^\]]+)?(\]\])/g,
+        /(!?\[\[)([^\]|]+?)(\.(md|excalidraw|duckdb))?(\|[^\]]+)?(\]\])/g,
         (match, open, name, ext, _extType, alias, close) => {
           const trimmed = name.trim();
           if (trimmed === oldName || trimmed === oldName + (ext || "")) {
@@ -101,7 +101,7 @@ export async function findBacklinks(name) {
   const results = [];
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const linkRe = new RegExp(
-    `!?\\[\\[${escapedName}(?:\\.(md|excalidraw))?(?:\\|[^\\]]+)?\\]\\]`, "i"
+    `!?\\[\\[${escapedName}(?:\\.(md|excalidraw|duckdb))?(?:\\|[^\\]]+)?\\]\\]`, "i"
   );
 
   const [mdFiles, exFiles] = await Promise.all([
