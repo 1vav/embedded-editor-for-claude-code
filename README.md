@@ -73,6 +73,30 @@ claude mcp add --transport stdio embedded-editor -- npx -y embedded-editor-for-c
 
 Claude calls the MCP tools and returns PNG previews inline as it builds the diagram.
 
+### DuckDB tables with a live query pane
+
+> "Create a table tracking sprint velocity — story points planned vs delivered"
+
+Claude creates `velocity.duckdb`, defines the schema, and seeds it with rows. Open the file in the browser and you get a full table viewer with a **slideout SQL query pane**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  velocity.duckdb  · 4 rows  │ ⌘ Query │ ≡ Table │ ⊞ Cards │ ↓  │
+├──────────┬───────────────────────────────────────────────────────┤
+│ SQL·QUERY│  sprint  │ planned │ delivered │ pct   │ status      │
+│          ├──────────┼─────────┼───────────┼───────┼─────────────│
+│ SELECT   │  1       │ 34      │ 29        │ 85.3% │ ⚠ Below     │
+│   sprint,│  2       │ 40      │ 38        │ 95.0% │ ✓           │
+│   ...    │  3       │ 36      │ 36        │ 100%  │ ✓           │
+│          │  4       │ 42      │ 31        │ 73.8% │ ⚠ Below     │
+│ ▶ Run ⌘↵ │                                                       │
+└──────────┴───────────────────────────────────────────────────────┘
+```
+
+Click **⌘ Query** to slide the SQL editor open. Write any SQL and hit `⌘↵` — results replace the table view instantly. Switch to **⊞ Cards** for a Kanban-style board that groups rows by any column (auto-detected from `status`, `state`, `stage`, etc.) with drag-to-regroup.
+
+Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an inline table that updates whenever the data changes.
+
 ---
 
 ## MCP tools
