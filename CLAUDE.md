@@ -65,6 +65,17 @@ npm run build              # both of the above
 - History: `.excalidraw-history/{name}/{timestamp}.json`
 - Recent list: `.excalidraw-recent.json` (auto-generated, gitignored)
 
+## Adding a New File Type — Icon Sync Rule
+
+When adding a new file type with a brand icon (e.g., `DuckBrandIcon`), it must appear in **both** of these locations in `src/viewer/entry.jsx`:
+
+1. **BrandMark component** (~line 938) — the title-bar icon strip shown at the top of every page.
+2. **Home page icon row** (~line 1948) — the large icon display shown when no file is open.
+
+Also update the **home page subtitle** (~line 1958) to include the new type (e.g., add `· tables` to the `diagrams · canvases · notes · ...` string).
+
+Forgetting either location results in the icon appearing in one place but not the other.
+
 ## Starting the Dev Server
 
 **Always use `preview_start` — never `node bin/cli.js view` directly.** Running the CLI directly occupies port 3000 and causes `preview_start` to fail with `EADDRINUSE`.

@@ -931,7 +931,7 @@ function BrandMark({ onHome }) {
   const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
   return (
     <div onClick={onHome} title="Home"
-      style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
         paddingRight: 8, borderRight: `1px solid ${T.border2}`,
         cursor: onHome ? "pointer" : "default", opacity: 1 }}>
       <span title="Markdown notes" style={{ display: "flex", color: T.text, opacity: 0.8 }}>
@@ -1953,9 +1953,11 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ display: "flex" }}><TldrawBrandIcon size={30} isDark={T.isDark} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex" }}><CodeBrandIcon size={30} /></span>
+        <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
+        <span style={{ display: "flex", color: "#facc15" }}><DuckBrandIcon size={30} /></span>
       </div>
       <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
-      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · wikilinks</div>
+      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
           <div style={{ color: T.muted, fontSize: 9, letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>RECENT</div>
@@ -2210,10 +2212,22 @@ function PromptBar({ active }) {
     const label = active.type === "diagram" ? `diagram "${active.name}"` : `note "${active.name}.md"`;
     const text  = val.trim().startsWith("Please ") ? val.trim()
                 : `Update the ${label}: ${val.trim()}`;
-    navigator.clipboard.writeText(text).then(() => {
-      setVal(""); setToast("copied — paste into claude ⌘V");
-      setTimeout(() => setToast(""), 3000);
-    }).catch(() => setToast("clipboard unavailable"));
+    const done = () => { setVal(""); setToast("copied — paste into claude ⌘V"); setTimeout(() => setToast(""), 3000); };
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        done();
+      } catch { setToast("clipboard unavailable"); }
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
   };
 
   return (
