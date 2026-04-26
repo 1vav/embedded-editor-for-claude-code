@@ -272,6 +272,20 @@ const _fence = md.renderer.rules.fence.bind(md.renderer);
 md.renderer.rules.fence = (tokens, idx, options, env, self) =>
   `<div class="code-block">${_fence(tokens, idx, options, env, self)}<button class="copy-btn">copy</button></div>`;
 
+// External links: open in new tab, show URL in title, add visual indicator.
+const _linkOpen = md.renderer.rules.link_open
+  || ((tokens, idx, opts, env, self) => self.renderToken(tokens, idx, opts));
+md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
+  const href = tokens[idx].attrGet("href") || "";
+  if (/^https?:\/\//.test(href)) {
+    tokens[idx].attrSet("target", "_blank");
+    tokens[idx].attrSet("rel",    "noopener noreferrer");
+    tokens[idx].attrSet("title",  href);
+    tokens[idx].attrSet("data-external", "true");
+  }
+  return _linkOpen(tokens, idx, opts, env, self);
+};
+
 // Split raw markdown on ![[name.excalidraw]] and ![[name.tldraw]] embed markers.
 // Returns [{type:"text",text}, {type:"diagram",name}, {type:"tldraw",name}, ...]
 // Skips matches that fall inside fenced code blocks (``` ... ```) or inline code spans (` ... `).
@@ -339,7 +353,7 @@ function renderMd(text) {
     /\[\[([^\]]+)\]\]/g,
     (n) => `<a data-wl="${esc(n.trim())}" href="#">${n.trim()}</a>`
   );
-  return DOMPurify.sanitize(md.render(pre2), { ADD_ATTR: ["data-wl"] });
+  return DOMPurify.sanitize(md.render(pre2), { ADD_ATTR: ["data-wl", "data-external", "target", "rel"] });
 }
 
 function esc(s) { return String(s).replace(/"/g, "&quot;"); }
@@ -1806,6 +1820,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
       }
       return;
     }
+    // External links — let the browser open them (target=_blank set by renderer)
+    const extLink = e.target.closest("a[data-external]");
+    if (extLink) return;  // don't preventDefault — browser handles it
     const wl = e.target.closest("[data-wl]");
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
@@ -2082,6 +2099,8 @@ function makeNoteStyles(T, S = NOTE_STYLES[0], C = null) {
   .note-body a[data-wl] { color: ${N.blue}; text-decoration: none; border-bottom: 1px solid ${N.blue}44; cursor: pointer; }
   .note-body a[data-wl]:hover { border-bottom-color: ${N.blue}; }
   .note-body a { color: ${N.blue}; }
+  .note-body a[data-external]::after { content: " ↗"; font-size: 0.75em; opacity: 0.6; vertical-align: super; }
+  .note-body a[data-external]:hover { text-decoration: underline; }
   .note-body code { font-family: ${T.mono}; font-size: .85em; background: ${N.surface2}; padding: .15em .35em; border-radius: 3px; color: ${N.orange}; }
   .note-body pre { background: ${N.surface2}; border: 1px solid ${N.border}; border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 1em 0; }
   .note-body pre code { background: none; padding: 0; color: ${N.text}; font-size: 12px; }
