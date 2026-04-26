@@ -1,10 +1,10 @@
 # Embedded Editor for Claude Code
 
-An embedded visual workspace for Claude Code — edit Excalidraw diagrams, tldraw canvases, and Markdown notes in the browser preview pane, all linked together with `[[wikilinks]]`.
+An embedded visual workspace for Claude Code — edit Excalidraw diagrams, tldraw canvases, Markdown notes, and DuckDB tables in the browser preview pane, all linked together with `[[wikilinks]]`.
 
 ![ee.png](assets/ee.png)
 
-Claude also gets **six MCP tools** to create and edit Excalidraw diagrams inline, with authentic PNG previews rendered by Excalidraw's own pipeline and returned directly in the chat.
+Claude also gets **MCP tools** to create, query, and edit all four file types inline — including authentic PNG previews for diagrams and structured table data for DuckDB files.
 
 ---
 
@@ -15,8 +15,9 @@ Claude also gets **six MCP tools** to create and edit Excalidraw diagrams inline
 | **⬡ Excalidraw** | Rough hand-drawn diagrams. Claude creates and edits them via MCP tools and sees PNG previews inline. Also fully editable in the browser. |
 | **◈ tldraw** | Infinite canvas with a full shape library. Browser-only — no MCP tools needed, just open and draw. |
 | **¶ Markdown** | Full CommonMark with `[[wikilinks]]`, `![[diagram embeds]]`, images, tables, code blocks, strikethrough. |
+| **🦆 DuckDB** | Real embedded analytical tables. Claude creates schemas, writes rows, and runs SQL queries via MCP tools. Embed live table previews in notes with `![[name.duckdb]]`. |
 
-All three editors are **live-synced** via SSE — Claude's edits appear in the browser immediately and vice versa.
+All four editors are **live-synced** via SSE — Claude's edits appear in the browser immediately and vice versa.
 
 ---
 
@@ -97,6 +98,17 @@ Claude calls the MCP tools and returns PNG previews inline as it builds the diag
 | `write_note` | Write (replace) note content |
 | `delete_note` | Delete a note |
 
+**DuckDB tables**
+
+| Tool | What it does |
+|---|---|
+| `list_tables` | List all `.duckdb` files |
+| `create_table` | Create a new DuckDB file with an optional schema |
+| `read_table` | Read rows from the first user table (returns markdown) |
+| `write_rows` | Upsert rows into a table |
+| `delete_rows` | Delete rows matching a WHERE clause |
+| `query_table` | Run arbitrary SQL; optional `save_as` inserts results into another table |
+
 **Workspace**
 
 | Tool | What it does |
@@ -120,7 +132,7 @@ Claude calls the MCP tools and returns PNG previews inline as it builds the diag
 
 ## Viewer features
 
-- **File browser** — sidebar lists all `.excalidraw`, `.tldraw`, and `.md` files; filter by type
+- **File browser** — sidebar lists all `.excalidraw`, `.tldraw`, `.md`, and `.duckdb` files; filter by type
 - **Wikilinks** — `[[filename]]` in any editor navigates to that file as a new tab
 - **Diagram embeds** — `![[diagram.excalidraw]]` in Markdown renders the diagram inline in preview
 - **Image embeds** — `![alt](image.png)` works with local files; the server serves them from the project directory
@@ -142,6 +154,8 @@ In the Markdown note editor, type `/` at the start of a line to open the command
 | `/diagram [description]` | Creates a new Excalidraw diagram, embeds it as `![[name.excalidraw]]`, and pre-fills the prompt bar with your description so Claude populates it |
 | `/canvas [description]` | Creates a new tldraw canvas and embeds it as `![[name.tldraw]]` |
 | `/note [description]` | Creates a new linked Markdown note, embeds it as `[[name]]`, and pre-fills the prompt bar for Claude to write its content |
+| `/table [description]` | Creates a new DuckDB table file, embeds it as `![[name.duckdb]]`, and pre-fills the prompt bar so Claude defines the schema |
+| `/query [description]` | Creates a new DuckDB file as a query result target, embeds it, and pre-fills Claude to write the query SQL |
 | `/link` | Opens a searchable picker of all existing files and inserts a wikilink |
 
 **How it works:**
