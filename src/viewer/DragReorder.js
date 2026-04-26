@@ -6,7 +6,7 @@
 //   startDrag / onDragMove / onDragEnd (module-level, not exported)
 
 import { ViewPlugin as _ViewPlugin, Decoration, WidgetType } from "@codemirror/view";
-import { RangeSetBuilder } from "@codemirror/state";
+import { RangeSetBuilder, ChangeSet } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
 // ── Types (JSDoc only, no TypeScript) ────────────────────────────────────────
@@ -18,10 +18,57 @@ let activeDrag = null;
 // activeDrag shape when non-null:
 // { view, groups, groupIdx, fromBlockIdx, insertBeforeIdx, lineEl }
 
-// buildReorderTransaction is implemented in Task 6.
-// Declare here so the drag state machine can reference it without a no-undef error.
-function buildReorderTransaction(_state, _group, _fromBlockIdx, _insertBeforeIdx) {
-  return null; // placeholder — overridden in Task 6
+export function buildReorderTransaction(state, group, fromBlockIdx, insertBeforeIdx) {
+  // No-op checks
+  if (insertBeforeIdx === fromBlockIdx || insertBeforeIdx === fromBlockIdx + 1) return null;
+  const { blocks, ordered } = group;
+  const n = blocks.length;
+  if (fromBlockIdx < 0 || fromBlockIdx >= n) return null;
+  if (insertBeforeIdx < 0 || insertBeforeIdx > n) return null;
+
+  // Build the new order of block indices.
+  // Remove fromBlockIdx from the sequence, insert it at insertBeforeIdx.
+  const order = [];
+  for (let i = 0; i < n; i++) {
+    if (i === fromBlockIdx) continue;
+    // When dragging forward (fromBlockIdx < insertBeforeIdx), the insertion slot
+    // in the reduced sequence is one less than the original insertBeforeIdx.
+    const adjustedInsert = fromBlockIdx < insertBeforeIdx
+      ? insertBeforeIdx - 1
+      : insertBeforeIdx;
+    if (order.length === adjustedInsert) order.push(fromBlockIdx);
+    order.push(i);
+  }
+  if (!order.includes(fromBlockIdx)) order.push(fromBlockIdx);
+
+  // Extract block texts from the original doc
+  const docStr = state.doc.toString();
+  const texts = blocks.map(b => docStr.slice(b.from, b.to));
+
+  // For ordered lists: reorder then renumber
+  if (ordered) {
+    const reorderedTexts = order.map(i => texts[i]);
+    // Use the original first item's number, not the reordered first item's number
+    const startNum = parseInt(texts[0].match(/^\s*(\d+)\./)?.[1] ?? "1");
+    const numberedTexts = reorderedTexts.map((t, i) =>
+      t.replace(/^(\s*)(\d+)(\.\s)/, (_m, space, _num, dot) => `${space}${startNum + i}${dot}`)
+    );
+    const rangeFrom = blocks[0].from;
+    const rangeTo   = blocks[n - 1].to;
+    return {
+      changes: ChangeSet.of({ from: rangeFrom, to: rangeTo, insert: numberedTexts.join("") }, state.doc.length),
+      selection: state.selection,
+    };
+  }
+
+  // Non-ordered: splice blocks in new order
+  const reorderedTexts = order.map(i => texts[i]);
+  const rangeFrom = blocks[0].from;
+  const rangeTo   = blocks[n - 1].to;
+  return {
+    changes: ChangeSet.of({ from: rangeFrom, to: rangeTo, insert: reorderedTexts.join("") }, state.doc.length),
+    selection: state.selection,
+  };
 }
 
 // ── DragHandleWidget ──────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EditorState } from "@codemirror/state";
 import { markdownLanguage } from "@codemirror/lang-markdown";
-import { parseBlocks } from "../src/viewer/DragReorder.js";
+import { parseBlocks, buildReorderTransaction } from "../src/viewer/DragReorder.js";
 
 function makeState(doc) {
   return EditorState.create({ doc, extensions: [markdownLanguage] });
@@ -109,4 +109,43 @@ test("H1 followed by H2: no sibling group formed", () => {
   const doc = `# Title\n## Sub\nContent\n`;
   const groups = parseBlocks(makeState(doc));
   assert.equal(groups.filter(g => g.type === "sections").length, 0);
+});
+
+test("reorderBlocks: move first item to last", () => {
+  const doc = `- A\n- B\n- C\n`;
+  const state = makeState(doc);
+  const groups = parseBlocks(state);
+  assert.equal(groups.length, 1);
+  const group = groups[0];
+  const tx = buildReorderTransaction(state, group, 0, 3); // move block 0 to after block 2
+  assert.ok(tx);
+  // Apply transaction manually
+  const newDoc = tx.changes.apply(state.doc).toString();
+  assert.equal(newDoc, `- B\n- C\n- A\n`);
+});
+
+test("reorderBlocks: move last item to first", () => {
+  const doc = `- A\n- B\n- C\n`;
+  const state = makeState(doc);
+  const group = parseBlocks(state)[0];
+  const tx = buildReorderTransaction(state, group, 2, 0); // move block 2 before block 0
+  const newDoc = tx.changes.apply(state.doc).toString();
+  assert.equal(newDoc, `- C\n- A\n- B\n`);
+});
+
+test("reorderBlocks: ordered list renumbers after reorder", () => {
+  const doc = `1. First\n2. Second\n3. Third\n`;
+  const state = makeState(doc);
+  const group = parseBlocks(state)[0];
+  const tx = buildReorderTransaction(state, group, 2, 0); // move "Third" to first
+  const newDoc = tx.changes.apply(state.doc).toString();
+  assert.equal(newDoc, `1. Third\n2. First\n3. Second\n`);
+});
+
+test("reorderBlocks: no-op returns null (same position)", () => {
+  const doc = `- A\n- B\n`;
+  const state = makeState(doc);
+  const group = parseBlocks(state)[0];
+  assert.equal(buildReorderTransaction(state, group, 0, 0), null);
+  assert.equal(buildReorderTransaction(state, group, 0, 1), null);
 });
