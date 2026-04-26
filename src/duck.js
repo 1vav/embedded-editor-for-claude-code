@@ -35,6 +35,11 @@ export function getDb(filePath) {
         pool.delete(filePath);
         return reject(err);
       }
+      if (!pool.has(filePath)) {
+        // closeAll() was called while we were opening; close this orphan
+        db.close(() => {});
+        return reject(new Error('DuckDB pool cleared during open'));
+      }
       entry.db = db;
       entry.promise = null; // clear the in-flight promise
       resetTimer(filePath);
@@ -48,7 +53,7 @@ export function getDb(filePath) {
 export function closeAll() {
   for (const { db, timer } of pool.values()) {
     clearTimeout(timer);
-    try { db.close(() => {}); } catch {}
+    try { if (db) db.close(() => {}); } catch {}
   }
   pool.clear();
 }
