@@ -4,7 +4,7 @@ import path   from "path";
 import { glob } from "glob";
 import { ROOT } from "./workspace.js";
 
-// pool: Map<filePath, { db: duckdb.Database, timer: NodeJS.Timeout }>
+// pool: Map<filePath, { db: duckdb.Database|null, timer: NodeJS.Timeout|null, promise: Promise|null }>
 const pool = new Map();
 const IDLE_MS = 60_000;
 
@@ -20,18 +20,29 @@ function resetTimer(filePath) {
 
 export function getDb(filePath) {
   if (pool.has(filePath)) {
+    const entry = pool.get(filePath);
+    // entry.promise is set while opening; entry.db is set once open
     resetTimer(filePath);
-    return Promise.resolve(pool.get(filePath).db);
+    return entry.promise || Promise.resolve(entry.db);
   }
-  return new Promise((resolve, reject) => {
+  // Placeholder so concurrent callers coalesce onto this open attempt
+  const entry = { db: null, timer: null, promise: null };
+  pool.set(filePath, entry);
+
+  entry.promise = new Promise((resolve, reject) => {
     const db = new duckdb.Database(filePath, (err) => {
-      if (err) return reject(err);
-      const entry = { db, timer: null };
-      pool.set(filePath, entry);
+      if (err) {
+        pool.delete(filePath);
+        return reject(err);
+      }
+      entry.db = db;
+      entry.promise = null; // clear the in-flight promise
       resetTimer(filePath);
       resolve(db);
     });
   });
+
+  return entry.promise;
 }
 
 export function closeAll() {
@@ -71,9 +82,12 @@ export async function runExec(filePath, sql, cwd = null) {
 // within EXCALIDRAW_ROOT. Throws if a resolved path escapes ROOT.
 function injectCwd(sql, filePath, cwd) {
   const base = cwd || path.dirname(filePath);
-  return sql.replace(/(['"])(\.\/[^'"]+)(['"])/g, (_, q1, rel, q2) => {
+  return sql.replace(/(['"])(\.[./][^'"]+)(['"])/g, (_, q1, rel, q2) => {
     const abs = path.resolve(base, rel);
-    if (!abs.startsWith(ROOT)) throw new Error(`Path escapes workspace: ${rel}`);
+    const rel2 = path.relative(ROOT, abs);
+    if (rel2.startsWith('..') || path.isAbsolute(rel2)) {
+      throw new Error(`Path escapes workspace: ${rel}`);
+    }
     return q1 + abs + q2;
   });
 }
@@ -83,15 +97,19 @@ function injectCwd(sql, filePath, cwd) {
 export async function readFrontmatter(globPattern, baseDir) {
   const files = await glob(globPattern, { cwd: baseDir, absolute: true });
   const { readFile } = await import("fs/promises");
-  const results = [];
-  for (const f of files) {
-    try {
-      const text = await readFile(f, "utf8");
-      const fm = parseFrontmatter(text);
-      if (fm) results.push({ _file: path.relative(baseDir, f), ...fm });
-    } catch {}
-  }
-  return results;
+  const entries = await Promise.all(
+    files.map(async (f) => {
+      try {
+        const text = await readFile(f, "utf8");
+        const fm = parseFrontmatter(text);
+        if (fm) return { _file: path.relative(baseDir, f), ...fm };
+      } catch (err) {
+        process.stderr.write(`readFrontmatter: skipping ${f}: ${err.message}\n`);
+      }
+      return null;
+    })
+  );
+  return entries.filter(Boolean);
 }
 
 function parseFrontmatter(text) {
