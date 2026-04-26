@@ -32,7 +32,7 @@ import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
-import { runQuery, runExec } from "./duck.js";
+import { runQuery, runExec, closeAll as duckCloseAll } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -150,6 +150,7 @@ function touchRecent(name, type) {
 
 // Synchronous flush on exit so recent list isn't lost on Ctrl-C
 process.on("exit", () => {
+  duckCloseAll();
   if (recentList !== null) {
     clearTimeout(recentFlushTimer);
     try { writeFileSync(RECENT_F, JSON.stringify(recentList, null, 2), "utf8"); } catch {}
@@ -247,7 +248,7 @@ function safeName(raw) {
     // but the name segment may carry extra encoding from the client).
     const decoded = decodeURIComponent(String(raw || ""));
     // Strip all three supported extensions
-    const stripped = decoded.replace(/\.(excalidraw|tldraw|md)$/i, "");
+    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb)$/i, "");
     return validateName(stripped);
   } catch {
     return null;
@@ -581,6 +582,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
             const params = new URL(req.url, "http://x").searchParams;
             const sql = params.get("sql") ||
               "SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '_ee_%'";
+            // Block mutating statements on read-only GET endpoint
+            if (/^\s*(drop|alter|insert|update|delete|attach|detach)\b/i.test(sql)) {
+              return json(res, { error: "mutating SQL not allowed on GET; use POST /query instead" }, 400);
+            }
             const result = await runQuery(fp, sql, tableDir);
             touchRecent(name, "table");
             return json(res, result);
@@ -771,7 +776,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         const safFrom = safeName(from);
         const safTo   = safeName(to);
         if (!safFrom || !safTo) return json(res, { error: "invalid name" }, 400);
-        const ext   = type === "note" ? ".md" : type === "tldraw" ? ".tldraw" : ".excalidraw";
+        const ext   = type === "note"    ? ".md"
+                   : type === "tldraw"  ? ".tldraw"
+                   : type === "table"   ? ".duckdb"
+                   : ".excalidraw";
         const oldFp = path.join(CWD, `${safFrom}${ext}`);
         const newFp = path.join(CWD, `${safTo}${ext}`);
         const rel1 = path.relative(CWD, oldFp);

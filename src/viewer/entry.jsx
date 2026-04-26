@@ -2289,7 +2289,8 @@ function App() {
       else refresh();
     }
     if (kind === "table") {
-      if (ev === "changed") refresh();
+      // "changed" with op=updated is already handled by refreshRecent() in the generic branch above
+      if (ev === "changed" && data?.op !== "updated") refresh();
       if (ev === "deleted") refresh();
     }
     if (ev === "deleted" || (kind === "code" && data.op === "deleted")) {
@@ -2386,6 +2387,7 @@ function App() {
     if (type === "diagram") await api.delDiag(name);
     else if (type === "tldraw") await api.delTldraw(name);
     else if (type === "code") await api.delCode(name);
+    else if (type === "table") await api.delTable(name);
     else await api.delNote(name);
     // Evict scroll cache entries for deleted note
     noteScrollCache.delete(`${name}:preview`);
