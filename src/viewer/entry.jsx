@@ -383,6 +383,7 @@ const DARK = {
   text: "#e0e0e0", textDim: "#999", muted: "#5a5a5a", muted2: "#3a3a3a",
   accent: "#4ade80", blue: "#60a5fa", red: "#f87171", orange: "#fb923c",
   tldraw: "#a78bfa",
+  duck: "#facc15",
   mono: MONO, noteFont: NOTE_FONT, isDark: true, excalidraw: "dark",
 };
 
@@ -392,6 +393,7 @@ const LIGHT = {
   text: "#1a1a18", textDim: "#55554f", muted: "#8a8a85", muted2: "#c8c7c2",
   accent: "#16a34a", blue: "#2563eb", red: "#dc2626", orange: "#c2410c",
   tldraw: "#7c3aed",
+  duck: "#b45309",
   mono: MONO, noteFont: NOTE_FONT, isDark: false, excalidraw: "light",
 };
 
@@ -426,6 +428,9 @@ const api = {
   saveCode:  (n, text, crlf, bom) => fetch(`/api/code/${enc(n)}`, { method: "PUT",  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, crlf, bom }) }),
   newCode:   (n)          => fetch(`/api/code/${enc(n)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "", crlf: false, bom: false }) }),
   delCode:   (n)          => fetch(`/api/code/${enc(n)}`, { method: "DELETE" }),
+  tables:    ()            => fetch("/api/tables").then(j),
+  newTable:  (n, createdBy) => fetch(`/api/table/${enc(n)}`, { method: "POST", headers: { "Content-Type": "application/json", "Origin": location.origin }, body: JSON.stringify({ created_by: createdBy }) }),
+  delTable:  (n)           => fetch(`/api/table/${enc(n)}`, { method: "DELETE", headers: { "Origin": location.origin } }),
   resolve:   (n)          => fetch(`/api/resolve/${enc(n)}`).then(j),
   backlinks: (n, type)    => fetch(`/api/backlinks/${enc(n)}?type=${type}`).then(j),
   history:   (n)          => fetch(`/api/history/${enc(n)}`).then(j),
@@ -648,10 +653,10 @@ function ColorPicker({ colorId, onChange }) {
 
 // ─── File Dropdown ────────────────────────────────────────────────────────────
 
-function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active, onOpen, onDelete, onClose }) {
+function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, recent, active, onOpen, onDelete, onClose }) {
   const T = useT();
   const [q,            setQ]            = useState("");
-  const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code
+  const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code | data
   const [openFolders, setOpenFolders] = useState(new Set()); // empty = all collapsed by default
   const ref = useRef();
   useClickOutside(ref, onClose);
@@ -667,12 +672,14 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
     ...(tldrawFiles || []).map(n => ({ name: n, type: "tldraw" })),
     ...notes.map(n => ({ name: n, type: "note" })),
     ...(codeFiles || []).map(n => ({ name: n, type: "code" })),
+    ...(tableFiles || []).map(n => ({ name: n, type: "table" })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   const shown = allFiles.filter(f => {
     if (filter === "drawings" && f.type !== "diagram" && f.type !== "tldraw") return false;
     if (filter === "notes"    && f.type !== "note")    return false;
     if (filter === "code"     && f.type !== "code")    return false;
+    if (filter === "data"     && f.type !== "table")   return false;
     return !q || f.name.toLowerCase().includes(q.toLowerCase());
   });
 
@@ -680,6 +687,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
     if (filter === "drawings" && r.type !== "diagram" && r.type !== "tldraw") return false;
     if (filter === "notes"    && r.type !== "note")    return false;
     if (filter === "code"     && r.type !== "code")    return false;
+    if (filter === "data"     && r.type !== "table")   return false;
     return !q || r.name.toLowerCase().includes(q.toLowerCase());
   }).slice(0, 6);
 
@@ -702,7 +710,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
             padding: "5px 8px", outline: "none",
           }} />
         <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
-          {["all","drawings","notes","code"].map(f => (
+          {["all","drawings","notes","code","data"].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
               background: filter === f ? T.surface3 : "transparent",
               border: `1px solid ${filter === f ? T.border2 : "transparent"}`,
@@ -779,8 +787,8 @@ function DropSection({ label, children }) {
 function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, title }) {
   const T = useT();
   const [h, sH] = useState(false);
-  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : "¶";
-  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : T.blue;
+  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : type === "table" ? null : "¶";
+  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : T.blue;
   return (
     <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
       title={title} style={{
@@ -790,7 +798,10 @@ function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, titl
         borderLeft: `2px solid ${active ? T.accent : "transparent"}`,
         cursor: "pointer", transition: "background .08s", minWidth: 0,
       }}>
-      <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+      {type === "table"
+        ? <DuckBrandIcon size={10} />
+        : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+      }
       <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
         color: active ? T.text : T.textDim, whiteSpace: "nowrap" }}>{midTruncate(name)}</span>
       {sub && <span style={{ color: T.muted, fontSize: 9, fontFamily: T.mono, flexShrink: 0 }}>{sub}</span>}
@@ -897,12 +908,22 @@ const TldrawBrandIcon = ({ size = 13, isDark }) => (
   </svg>
 );
 
+const DuckBrandIcon = ({ size = 14 }) => (
+  <svg width={size} height={Math.round(size * 0.93)} viewBox="0 0 24 22" fill="none" aria-label="duckdb">
+    <ellipse cx="13" cy="14" rx="9" ry="7" fill="#facc15"/>
+    <circle cx="20" cy="7" r="4.5" fill="#facc15"/>
+    <circle cx="21.5" cy="5.5" r="1" fill="#0d0d0d"/>
+    <path d="M23.5 7.5 L26.5 8 L23.5 9Z" fill="#fb923c"/>
+    <ellipse cx="11" cy="13" rx="5" ry="3.5" fill="#facc1566" transform="rotate(-15 11 13)"/>
+  </svg>
+);
+
 function BrandMark({ onHome }) {
   const T = useT();
   const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
   return (
     <div onClick={onHome} title="Home"
-      style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+      style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
         paddingRight: 8, borderRight: `1px solid ${T.border2}`,
         cursor: onHome ? "pointer" : "default", opacity: 1 }}>
       <span title="Markdown notes" style={{ display: "flex", color: T.text, opacity: 0.8 }}>
@@ -919,6 +940,10 @@ function BrandMark({ onHome }) {
       {dot}
       <span title="Code editor" style={{ display: "flex" }}>
         <CodeBrandIcon size={14} />
+      </span>
+      {dot}
+      <span title="DuckDB tables" style={{ display: "flex" }}>
+        <DuckBrandIcon size={14} />
       </span>
     </div>
   );
