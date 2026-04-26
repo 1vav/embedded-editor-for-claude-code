@@ -2350,8 +2350,10 @@ function App() {
       const diagMatch  = diagrams.find(d => d.toLowerCase() === lo);
       const tldrMatch  = tldrawFiles.find(t => t.toLowerCase() === lo);
       const tableMatch = tableFiles.find(t => t.toLowerCase() === lo);
+      const pdfMatch   = pdfFiles.find(p => p.toLowerCase() === lo);
 
       if      (tableMatch)                               { resolved = "table";   name = tableMatch; }
+      else if (pdfMatch)                                 { resolved = "pdf";     name = pdfMatch; }
       else if (noteMatch && !diagMatch && !tldrMatch)    { resolved = "note";    name = noteMatch; }
       else if (diagMatch && !noteMatch && !tldrMatch)    { resolved = "diagram"; name = diagMatch; }
       else if (tldrMatch && !noteMatch && !diagMatch)    { resolved = "tldraw";  name = tldrMatch; }
@@ -2372,7 +2374,7 @@ function App() {
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
     setActive(tab);
-  }, [notes, diagrams, tldrawFiles, tableFiles]);
+  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
