@@ -16,7 +16,7 @@ import { syntaxTree } from "@codemirror/language";
 // ── Module-level drag state ───────────────────────────────────────────────────
 let activeDrag = null;
 // activeDrag shape when non-null:
-// { view, groups, groupIdx, fromBlockIdx, insertBeforeIdx, lineEl }
+// { view, groupIdx, group, fromBlockIdx, insertBeforeIdx, lineEl, handleBtn }
 
 export function buildReorderTransaction(state, group, fromBlockIdx, insertBeforeIdx) {
   // No-op checks
@@ -28,14 +28,14 @@ export function buildReorderTransaction(state, group, fromBlockIdx, insertBefore
 
   // Build the new order of block indices.
   // Remove fromBlockIdx from the sequence, insert it at insertBeforeIdx.
+  // When dragging forward (fromBlockIdx < insertBeforeIdx), the insertion slot
+  // in the reduced sequence is one less than the original insertBeforeIdx.
+  const adjustedInsert = fromBlockIdx < insertBeforeIdx
+    ? insertBeforeIdx - 1
+    : insertBeforeIdx;
   const order = [];
   for (let i = 0; i < n; i++) {
     if (i === fromBlockIdx) continue;
-    // When dragging forward (fromBlockIdx < insertBeforeIdx), the insertion slot
-    // in the reduced sequence is one less than the original insertBeforeIdx.
-    const adjustedInsert = fromBlockIdx < insertBeforeIdx
-      ? insertBeforeIdx - 1
-      : insertBeforeIdx;
     if (order.length === adjustedInsert) order.push(fromBlockIdx);
     order.push(i);
   }
@@ -134,16 +134,25 @@ function buildHandleDecorations(view) {
 
 // ── Drag state machine ────────────────────────────────────────────────────────
 
+function cancelDrag() {
+  if (!activeDrag) return;
+  const { lineEl, handleBtn } = activeDrag;
+  lineEl.remove();
+  if (handleBtn) handleBtn.classList.remove("ee-active");
+  document.removeEventListener("mousemove", onDragMove,    { capture: true });
+  document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
+  document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
+  window.removeEventListener("blur",        onDragCancel);
+  activeDrag = null;
+}
+
+function onDragCancel() {
+  cancelDrag();
+}
+
 function startDrag(view, groupIdx, blockIdx, mouseEvent) {
-  // Guard: cancel any in-progress drag before starting a new one
-  if (activeDrag) {
-    activeDrag.lineEl.remove();
-    if (activeDrag.handleBtn) activeDrag.handleBtn.classList.remove("ee-active");
-    document.removeEventListener("mousemove", onDragMove,    { capture: true });
-    document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
-    document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
-    activeDrag = null;
-  }
+  // Cancel any in-progress drag before starting a new one
+  cancelDrag();
 
   const groups = parseBlocks(view.state);
   const group = groups[groupIdx];
@@ -161,7 +170,6 @@ function startDrag(view, groupIdx, blockIdx, mouseEvent) {
 
   activeDrag = {
     view,
-    groups,
     groupIdx,
     group,
     fromBlockIdx: blockIdx,
@@ -170,9 +178,10 @@ function startDrag(view, groupIdx, blockIdx, mouseEvent) {
     handleBtn,
   };
 
-  document.addEventListener("mousemove", onDragMove, { capture: true });
-  document.addEventListener("mouseup",   onDragEnd,   { capture: true });
+  document.addEventListener("mousemove", onDragMove,    { capture: true });
+  document.addEventListener("mouseup",   onDragEnd,     { capture: true });
   document.addEventListener("keydown",   onDragKeyDown, { capture: true });
+  window.addEventListener("blur",        onDragCancel);
 }
 
 function getInsertBefore(view, blocks, clientY) {
@@ -189,6 +198,7 @@ function getInsertBefore(view, blocks, clientY) {
 }
 
 function positionInsertLine(view, blocks, insertBefore) {
+  if (!activeDrag) return;
   const { lineEl } = activeDrag;
   let docY;
   if (insertBefore === 0) {
@@ -214,15 +224,9 @@ function onDragMove(e) {
 
 function onDragEnd(_e) {
   if (!activeDrag) return;
-  const { view, group, fromBlockIdx, insertBeforeIdx, lineEl, handleBtn } = activeDrag;
-
-  // Cleanup
-  lineEl.remove();
-  if (handleBtn) handleBtn.classList.remove("ee-active");
-  document.removeEventListener("mousemove", onDragMove,    { capture: true });
-  document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
-  document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
-  activeDrag = null;
+  // Capture needed values before cancelDrag() nulls activeDrag
+  const { view, group, fromBlockIdx, insertBeforeIdx } = activeDrag;
+  cancelDrag();
 
   // No-op if dropped in same position
   if (insertBeforeIdx === fromBlockIdx || insertBeforeIdx === fromBlockIdx + 1) return;
@@ -232,15 +236,7 @@ function onDragEnd(_e) {
 }
 
 function onDragKeyDown(e) {
-  if (e.key === "Escape" && activeDrag) {
-    const { lineEl, handleBtn } = activeDrag;
-    lineEl.remove();
-    if (handleBtn) handleBtn.classList.remove("ee-active");
-    document.removeEventListener("mousemove", onDragMove,    { capture: true });
-    document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
-    document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
-    activeDrag = null;
-  }
+  if (e.key === "Escape") cancelDrag();
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────
@@ -396,12 +392,16 @@ export function makeDragReorderPlugin() {
   const plugin = ViewPlugin.fromClass(
     class {
       constructor(view) {
+        this.view = view;
         this.decorations = buildHandleDecorations(view);
       }
       update(update) {
         if (update.docChanged || update.viewportChanged) {
           this.decorations = buildHandleDecorations(update.view);
         }
+      }
+      destroy() {
+        if (activeDrag && activeDrag.view === this.view) cancelDrag();
       }
     },
     { decorations: instance => instance.decorations }

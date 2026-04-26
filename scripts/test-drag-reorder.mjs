@@ -149,3 +149,16 @@ test("reorderBlocks: no-op returns null (same position)", () => {
   assert.equal(buildReorderTransaction(state, group, 0, 0), null);
   assert.equal(buildReorderTransaction(state, group, 0, 1), null);
 });
+
+test("list item with continuation line: block spans both lines", () => {
+  const doc = `- First item\n  continuation\n- Second item\n`;
+  const state = makeState(doc);
+  const groups = parseBlocks(state);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].type, "listItems");
+  assert.equal(groups[0].blocks.length, 2);
+  // First block should span "- First item\n  continuation\n"
+  const texts = groups[0].blocks.map(b => doc.slice(b.from, b.to));
+  assert.equal(texts[0], "- First item\n  continuation\n");
+  assert.equal(texts[1], "- Second item\n");
+});
