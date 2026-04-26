@@ -32,6 +32,7 @@ import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
+import { runQuery, runExec } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -89,11 +90,13 @@ try {
     if      (filename.endsWith(".excalidraw")) event = "diagram:changed";
     else if (filename.endsWith(".tldraw"))     event = "tldraw:changed";
     else if (filename.endsWith(".md"))         event = "note:changed";
+    else if (filename.endsWith(".duckdb"))     event = "table:changed";
     else if (isCodeFile(filename))             event = "code:changed";
     else return;
     const name = filename.endsWith(".excalidraw") ? filename.replace(/\.excalidraw$/, "")
                : filename.endsWith(".tldraw")     ? filename.replace(/\.tldraw$/, "")
                : filename.endsWith(".md")         ? filename.replace(/\.md$/, "")
+               : filename.endsWith(".duckdb")     ? filename.replace(/\.duckdb$/, "")
                : filename;
     clearTimeout(debounces.get(filename));
     debounces.set(filename, setTimeout(() => {
@@ -104,6 +107,7 @@ try {
       if      (event === "diagram:changed") touchRecent(name, "diagram");
       else if (event === "tldraw:changed")  touchRecent(name, "tldraw");
       else if (event === "note:changed")    touchRecent(name, "note");
+      else if (event === "table:changed")   touchRecent(name, "table");
     }, 120));
   });
 } catch (e) {
@@ -446,6 +450,12 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         return json(res, files.map(f => f.replace(/\.tldraw$/, "")).sort());
       }
 
+      // ── Tables list
+      if (pathname === "/api/tables") {
+        const files = await glob("**/*.duckdb", { cwd: CWD, ignore: ["node_modules/**"] });
+        return json(res, files.map(f => f.replace(/\.duckdb$/, "")).sort());
+      }
+
       // ── Recent
       if (pathname === "/api/recent") return json(res, await loadRecent());
 
@@ -551,6 +561,88 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         res.writeHead(405); return res.end();
       }
 
+      // ── Table CRUD
+      const tbm = pathname.match(/^\/api\/table\/(.+)$/);
+      if (tbm) {
+        const rawSeg = tbm[1];
+        const isRows  = rawSeg.endsWith("/rows");
+        const isQuery = rawSeg.endsWith("/query");
+        const rawName = isRows  ? rawSeg.slice(0, -5)
+                      : isQuery ? rawSeg.slice(0, -6)
+                      : rawSeg;
+        const name = safeName(rawName);
+        if (!name) return json(res, { error: "invalid name" }, 400);
+        const fp       = path.join(CWD, `${name}.duckdb`);
+        const tableDir = path.dirname(fp);
+
+        // GET /api/table/:name — list tables or run ?sql=
+        if (method === "GET" && !isRows && !isQuery) {
+          try {
+            const params = new URL(req.url, "http://x").searchParams;
+            const sql = params.get("sql") ||
+              "SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '_ee_%'";
+            const result = await runQuery(fp, sql, tableDir);
+            touchRecent(name, "table");
+            return json(res, result);
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        // POST /api/table/:name — create
+        if (method === "POST" && !isRows && !isQuery) {
+          try {
+            await fs.access(fp);
+            return json(res, { error: `${name}.duckdb already exists` }, 409);
+          } catch {}
+          const body = await readBody(req);
+          const createdBy = body?.created_by ?? "table";
+          try {
+            await fs.mkdir(path.dirname(fp), { recursive: true });
+            await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', '${createdBy}')`);
+            if (body?.schema) await runExec(fp, body.schema, tableDir);
+            touchRecent(name, "table");
+            broadcast("table:changed", { name, op: "created" });
+            return json(res, { ok: true });
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        // PUT /api/table/:name/rows — upsert rows
+        if (method === "PUT" && isRows) {
+          const body = await readBody(req);
+          if (!body?.table || !Array.isArray(body.rows)) return json(res, { error: "expected {table, rows}" }, 400);
+          try {
+            for (const row of body.rows) {
+              const cols = Object.keys(row).map(c => `"${c}"`).join(", ");
+              const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null ? "NULL" : v)).join(", ");
+              await runExec(fp, `INSERT INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+            }
+            broadcast("table:changed", { name, op: "updated" });
+            return json(res, { ok: true, count: body.rows.length });
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        // DELETE /api/table/:name
+        if (method === "DELETE" && !isRows && !isQuery) {
+          try {
+            await fs.unlink(fp);
+            broadcast("table:deleted", { name, op: "deleted" });
+            return json(res, { ok: true });
+          } catch { return json(res, { error: "not found" }, 404); }
+        }
+
+        // POST /api/table/:name/query — run arbitrary SQL
+        if (method === "POST" && isQuery) {
+          const body = await readBody(req);
+          if (!body?.sql) return json(res, { error: "expected {sql}" }, 400);
+          try {
+            const result = await runQuery(fp, body.sql, tableDir);
+            return json(res, result);
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        res.writeHead(405); return res.end();
+      }
+
       // ── SVG render
       const sm = pathname.match(/^\/api\/svg\/(.+)$/);
       if (sm) {
@@ -633,21 +725,24 @@ export async function startViewerServer(port = DEFAULT_PORT) {
       if (resolveM) {
         const name = safeName(resolveM[1]);
         if (!name) return json(res, { error: "invalid name" }, 400);
-        // Exact match first (fast — three fs.access calls in parallel)
-        const [mdEx, exEx, tlEx] = await Promise.all([
+        // Exact match first (fast — four fs.access calls in parallel)
+        const [mdEx, exEx, tlEx, dkEx] = await Promise.all([
           fs.access(path.join(CWD, `${name}.md`)).then(() => true).catch(() => false),
           fs.access(path.join(CWD, `${name}.excalidraw`)).then(() => true).catch(() => false),
           fs.access(path.join(CWD, `${name}.tldraw`)).then(() => true).catch(() => false),
+          fs.access(path.join(CWD, `${name}.duckdb`)).then(() => true).catch(() => false),
         ]);
         if (mdEx) return json(res, { type: "note",    name });
         if (exEx) return json(res, { type: "diagram", name });
         if (tlEx) return json(res, { type: "tldraw",  name });
-        // Case-insensitive fallback — run all three globs in parallel
+        if (dkEx) return json(res, { type: "table",   name });
+        // Case-insensitive fallback — run all four globs in parallel
         const lo = name.toLowerCase();
-        const [allMd, allEx, allTl] = await Promise.all([
+        const [allMd, allEx, allTl, allDk] = await Promise.all([
           glob("**/*.md",         { cwd: CWD, ignore: ["node_modules/**"] }),
           glob("**/*.excalidraw", { cwd: CWD, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
           glob("**/*.tldraw",     { cwd: CWD, ignore: ["node_modules/**"] }),
+          glob("**/*.duckdb",     { cwd: CWD, ignore: ["node_modules/**"] }),
         ]);
         const mdHit = allMd.find(f => f.replace(/\.md$/, "").toLowerCase() === lo);
         if (mdHit) return json(res, { type: "note",    name: mdHit.replace(/\.md$/, "") });
@@ -655,6 +750,8 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         if (exHit) return json(res, { type: "diagram", name: exHit.replace(/\.excalidraw$/, "") });
         const tlHit = allTl.find(f => f.replace(/\.tldraw$/, "").toLowerCase() === lo);
         if (tlHit) return json(res, { type: "tldraw",  name: tlHit.replace(/\.tldraw$/, "") });
+        const dkHit = allDk.find(f => f.replace(/\.duckdb$/, "").toLowerCase() === lo);
+        if (dkHit) return json(res, { type: "table",   name: dkHit.replace(/\.duckdb$/, "") });
         return json(res, { type: null, name });
       }
 
