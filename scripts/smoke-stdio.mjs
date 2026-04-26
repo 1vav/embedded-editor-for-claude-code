@@ -81,10 +81,10 @@ try {
   const tools = await rpc("tools/list", {});
   const names = tools.tools.map((t) => t.name).sort();
   const expected = [
-    "append_elements","create_diagram","create_note","delete_diagram","delete_note",
-    "get_backlinks","list_diagrams","list_history","list_notes","list_tldraw",
-    "read_diagram","read_note","read_tldraw","rename_file","restore_snapshot",
-    "write_diagram","write_note",
+    "append_elements","create_diagram","create_note","create_table","delete_diagram","delete_note",
+    "delete_rows","get_backlinks","list_diagrams","list_history","list_notes","list_tables","list_tldraw",
+    "query_table","read_diagram","read_note","read_table","read_tldraw","rename_file","restore_snapshot",
+    "write_diagram","write_note","write_rows",
   ].sort();
   assert(
     JSON.stringify(names) === JSON.stringify(expected),
@@ -134,6 +134,47 @@ try {
   const del = await rpc("tools/call", { name: "delete_diagram", arguments: { name: "flow" } });
   assert(del.content[0].text.includes("Deleted"), "delete confirmed");
   assert(!fs.existsSync(path.join(workdir, "flow.excalidraw")), "file removed on disk");
+
+  // ── DuckDB MCP tools
+  console.log("\n── DuckDB tools");
+
+  let duckR;
+
+  duckR = await rpc("tools/call", { name: "list_tables", arguments: {} });
+  assert(duckR.content[0].text === "(no tables)", "list_tables empty");
+
+  duckR = await rpc("tools/call", { name: "create_table", arguments: {
+    name: "smoke-jobs",
+    schema: "CREATE TABLE jobs (id INTEGER PRIMARY KEY, company TEXT, status TEXT)",
+    created_by: "table"
+  }});
+  assert(duckR.content[0].text.includes("Created"), "create_table");
+
+  duckR = await rpc("tools/call", { name: "write_rows", arguments: {
+    name: "smoke-jobs", table: "jobs",
+    rows: [{ id: 1, company: "Acme", status: "Applied" }]
+  }});
+  assert(duckR.content[0].text.includes("1 row"), "write_rows");
+
+  duckR = await rpc("tools/call", { name: "read_table", arguments: { name: "smoke-jobs" }});
+  assert(duckR.content[0].text.includes("Acme"), "read_table");
+
+  duckR = await rpc("tools/call", { name: "query_table", arguments: {
+    name: "smoke-jobs",
+    sql: "SELECT count(*) AS n FROM jobs"
+  }});
+  assert(duckR.content[0].text.includes("1"), "query_table count");
+
+  duckR = await rpc("tools/call", { name: "delete_rows", arguments: {
+    name: "smoke-jobs", table: "jobs", condition: "id = 1"
+  }});
+  assert(duckR.content[0].text.includes("Deleted"), "delete_rows");
+
+  duckR = await rpc("tools/call", { name: "list_tables", arguments: {} });
+  assert(duckR.content[0].text.includes("smoke-jobs"), "list_tables after create");
+
+  // Clean up DuckDB smoke test file
+  try { fs.unlinkSync(path.join(workdir, "smoke-jobs.duckdb")); } catch {}
 
   console.log("\n[smoke] OK — all checks passed.");
   console.log("[smoke] PNGs saved at /tmp/smoke-{created,written,appended}.png");
