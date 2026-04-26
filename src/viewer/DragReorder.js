@@ -5,8 +5,8 @@
 // Internal:
 //   startDrag / onDragMove / onDragEnd (module-level, not exported)
 
-import { ViewPlugin as _ViewPlugin, Decoration as _Decoration, WidgetType as _WidgetType } from "@codemirror/view";
-import { RangeSetBuilder as _RangeSetBuilder } from "@codemirror/state";
+import { ViewPlugin as _ViewPlugin, Decoration, WidgetType } from "@codemirror/view";
+import { RangeSetBuilder } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
 // ── Types (JSDoc only, no TypeScript) ────────────────────────────────────────
@@ -14,9 +14,176 @@ import { syntaxTree } from "@codemirror/language";
 // Block: { from: number, to: number }
 
 // ── Module-level drag state ───────────────────────────────────────────────────
-let _activeDrag = null;
+let activeDrag = null;
 // activeDrag shape when non-null:
 // { view, groups, groupIdx, fromBlockIdx, insertBeforeIdx, lineEl }
+
+// buildReorderTransaction is implemented in Task 6.
+// Declare here so the drag state machine can reference it without a no-undef error.
+function buildReorderTransaction(_state, _group, _fromBlockIdx, _insertBeforeIdx) {
+  return null; // placeholder — overridden in Task 6
+}
+
+// ── DragHandleWidget ──────────────────────────────────────────────────────────
+
+class DragHandleWidget extends WidgetType {
+  constructor(groupIdx, blockIdx) {
+    super();
+    this.groupIdx = groupIdx;
+    this.blockIdx = blockIdx;
+  }
+
+  eq(other) {
+    return other.groupIdx === this.groupIdx && other.blockIdx === this.blockIdx;
+  }
+
+  toDOM(view) {
+    // Inner button (absolutely positioned into the left margin)
+    const btn = document.createElement("span");
+    btn.className = "ee-drag-handle-btn";
+    btn.setAttribute("aria-hidden", "true");
+    btn.textContent = "⠿";
+    btn.addEventListener("mousedown", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      startDrag(view, this.groupIdx, this.blockIdx, e);
+    });
+
+    // Outer wrapper: zero width, overflow visible so the btn floats left
+    const outer = document.createElement("span");
+    outer.className = "ee-drag-handle";
+    outer.appendChild(btn);
+    return outer;
+  }
+
+  ignoreEvent() { return true; }
+}
+
+// ── buildHandleDecorations ────────────────────────────────────────────────────
+
+function _buildHandleDecorations(view) {
+  const groups = parseBlocks(view.state);
+  const builder = new RangeSetBuilder();
+
+  // Collect (pos, widget) pairs then sort by pos before adding to builder.
+  // RangeSetBuilder requires additions in ascending order.
+  const entries = [];
+  groups.forEach((group, groupIdx) => {
+    group.blocks.forEach((block, blockIdx) => {
+      entries.push({ pos: block.from, groupIdx, blockIdx });
+    });
+  });
+  entries.sort((a, b) => a.pos - b.pos);
+
+  for (const { pos, groupIdx, blockIdx } of entries) {
+    builder.add(pos, pos, Decoration.widget({
+      widget: new DragHandleWidget(groupIdx, blockIdx),
+      side: -1,
+    }));
+  }
+
+  return builder.finish();
+}
+
+// ── Drag state machine ────────────────────────────────────────────────────────
+
+function startDrag(view, groupIdx, blockIdx, mouseEvent) {
+  const groups = parseBlocks(view.state);
+  const group = groups[groupIdx];
+  if (!group || group.blocks.length < 2) return;
+
+  // Create a floating insert-line indicator inside view.dom.
+  const lineEl = document.createElement("div");
+  lineEl.className = "ee-drag-line";
+  view.dom.appendChild(lineEl);
+
+  // Highlight the active handle button
+  const handleBtn = mouseEvent.target.closest(".ee-drag-handle-btn");
+  if (handleBtn) handleBtn.classList.add("ee-active");
+
+  activeDrag = {
+    view,
+    groups,
+    groupIdx,
+    group,
+    fromBlockIdx: blockIdx,
+    insertBeforeIdx: blockIdx,  // "no-op" initial value
+    lineEl,
+    handleBtn,
+  };
+
+  document.addEventListener("mousemove", onDragMove, { capture: true });
+  document.addEventListener("mouseup",   onDragEnd,   { capture: true });
+  document.addEventListener("keydown",   onDragKeyDown, { capture: true });
+}
+
+function getInsertBefore(view, blocks, clientY) {
+  // Convert clientY to document-coordinate Y within the CM editor.
+  const scrollRect = view.scrollDOM.getBoundingClientRect();
+  const relY = clientY - scrollRect.top + view.scrollDOM.scrollTop;
+
+  for (let i = 0; i < blocks.length; i++) {
+    const lb = view.lineBlockAt(blocks[i].from);
+    // If mouse is in the top half of block i, insert before block i.
+    if (relY < lb.top + lb.height / 2) return i;
+  }
+  return blocks.length; // insert after last block
+}
+
+function positionInsertLine(view, blocks, insertBefore) {
+  const { lineEl } = activeDrag;
+  let docY;
+  if (insertBefore === 0) {
+    docY = view.lineBlockAt(blocks[0].from).top;
+  } else if (insertBefore >= blocks.length) {
+    const lb = view.lineBlockAt(blocks[blocks.length - 1].from);
+    docY = lb.top + lb.height;
+  } else {
+    docY = view.lineBlockAt(blocks[insertBefore].from).top;
+  }
+  const scrollOffset = view.scrollDOM.scrollTop;
+  lineEl.style.top = `${docY - scrollOffset}px`;
+  lineEl.style.display = "block";
+}
+
+function onDragMove(e) {
+  if (!activeDrag) return;
+  const { view, group } = activeDrag;
+  const insertBefore = getInsertBefore(view, group.blocks, e.clientY);
+  activeDrag.insertBeforeIdx = insertBefore;
+  positionInsertLine(view, group.blocks, insertBefore);
+}
+
+function onDragEnd(_e) {
+  if (!activeDrag) return;
+  const { view, group, fromBlockIdx, insertBeforeIdx, lineEl, handleBtn } = activeDrag;
+
+  // Cleanup
+  lineEl.remove();
+  if (handleBtn) handleBtn.classList.remove("ee-active");
+  document.removeEventListener("mousemove", onDragMove,    { capture: true });
+  document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
+  document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
+  activeDrag = null;
+
+  // No-op if dropped in same position
+  if (insertBeforeIdx === fromBlockIdx || insertBeforeIdx === fromBlockIdx + 1) return;
+
+  const tx = buildReorderTransaction(view.state, group, fromBlockIdx, insertBeforeIdx);
+  if (tx) view.dispatch(tx);
+}
+
+function onDragKeyDown(e) {
+  if (e.key === "Escape" && activeDrag) {
+    const { lineEl, handleBtn } = activeDrag;
+    lineEl.remove();
+    if (handleBtn) handleBtn.classList.remove("ee-active");
+    document.removeEventListener("mousemove", onDragMove,    { capture: true });
+    document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
+    document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
+    activeDrag = null;
+  }
+}
 
 // ── Exports ───────────────────────────────────────────────────────────────────
 
