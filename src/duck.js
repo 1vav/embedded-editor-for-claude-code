@@ -13,7 +13,7 @@ function resetTimer(filePath) {
   if (!entry) return;
   clearTimeout(entry.timer);
   entry.timer = setTimeout(() => {
-    entry.db.close(() => {});
+    if (entry.db) entry.db.close(() => {});
     pool.delete(filePath);
   }, IDLE_MS);
 }
