@@ -1465,6 +1465,27 @@ function makeSlashSource() {
     link:    "link to existing file",
   };
 
+  // Text-insert commands — insert Markdown syntax without creating files.
+  const TEXT_CMDS = [
+    { label: "heading1",  aliases: ["h1"],                    detail: "# Heading 1",    info: "Insert an H1 heading",        template: "# ",        cursorOffset: 2  },
+    { label: "heading2",  aliases: ["h2"],                    detail: "## Heading 2",   info: "Insert an H2 heading",        template: "## ",       cursorOffset: 3  },
+    { label: "heading3",  aliases: ["h3"],                    detail: "### Heading 3",  info: "Insert an H3 heading",        template: "### ",      cursorOffset: 4  },
+    { label: "bullet",    aliases: ["ul", "list"],            detail: "- item",         info: "Insert a bullet list item",   template: "- ",        cursorOffset: 2  },
+    { label: "todo",      aliases: ["task", "checkbox"],      detail: "- [ ] task",     info: "Insert a task checkbox",      template: "- [ ] ",    cursorOffset: 6  },
+    { label: "callout",   aliases: ["quote", "blockquote"],   detail: "> blockquote",   info: "Insert a blockquote",         template: "> ",        cursorOffset: 2  },
+    { label: "divider",   aliases: ["hr", "rule", "separator"], detail: "---",          info: "Insert a horizontal divider", template: "\n---\n",   cursorOffset: 5  },
+    { label: "codeblock", aliases: ["code", "fence"],         detail: "```code```",     info: "Insert a fenced code block",  template: "```\n\n```", cursorOffset: 4 },
+    { label: "bold",      aliases: ["b", "strong"],           detail: "**bold**",       info: "Insert bold text",            template: "****",      cursorOffset: 2  },
+    { label: "italic",    aliases: ["i", "em"],               detail: "*italic*",       info: "Insert italic text",          template: "**",        cursorOffset: 1  },
+  ];
+
+  function applyTextCmd(view, completion, from, to) {
+    view.dispatch({
+      changes: { from, to, insert: completion.template },
+      selection: { anchor: from + completion.cursorOffset },
+    });
+  }
+
   return async function slashSource(context) {
     const line = context.state.doc.lineAt(context.pos);
     const lineText = context.state.doc.sliceString(line.from, context.pos);
@@ -1478,15 +1499,36 @@ function makeSlashSource() {
 
     // Still typing the command word — show matching commands as prefix completions
     if (!hasSpace) {
-      const matching = ALL_CMDS.filter(c => c.startsWith(cmdTyped));
-      if (matching.length === 0) return null;
+      const matchingFile = ALL_CMDS.filter(c => c.startsWith(cmdTyped));
+      // For text commands, match against label and all aliases.
+      const seenTextLabels = new Set();
+      const matchingText = TEXT_CMDS.filter(c => {
+        const labels = [c.label, ...(c.aliases ?? [])];
+        return labels.some(l => l.startsWith(cmdTyped));
+      }).filter(c => {
+        if (seenTextLabels.has(c.label)) return false;
+        seenTextLabels.add(c.label);
+        return true;
+      });
+      if (matchingFile.length === 0 && matchingText.length === 0) return null;
       return {
         from: line.from, filter: false,
-        options: matching.map((c, i) => ({
-          label:  `/${c}`,
-          detail: CMD_DETAIL[c],
-          boost:  ALL_CMDS.length - i,
-        })),
+        options: [
+          ...matchingFile.map((c, i) => ({
+            label:  `/${c}`,
+            detail: CMD_DETAIL[c],
+            boost:  ALL_CMDS.length - i,
+          })),
+          ...matchingText.map((c, i) => ({
+            label:  `/${c.label}`,
+            detail: c.detail,
+            info:   c.info,
+            boost:  -(i + 1),
+            apply:  (view, completion, from, to) => applyTextCmd(view, { ...c }, from, to),
+            template: c.template,
+            cursorOffset: c.cursorOffset,
+          })),
+        ],
       };
     }
 
