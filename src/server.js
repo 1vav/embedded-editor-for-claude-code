@@ -426,7 +426,16 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
           : typeof v === "string" ? `'${v.replace(/'/g, "''")}'`
           : v
         ).join(", ");
-        await runExec(fp, `INSERT OR REPLACE INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+        try {
+          await runExec(fp, `INSERT OR REPLACE INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+        } catch (e) {
+          if (e.message?.includes('UNIQUE/PRIMARY KEY') || e.message?.includes('ON CONFLICT')) {
+            // Table has no PK — fall back to plain INSERT
+            await runExec(fp, `INSERT INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+          } else {
+            throw e;
+          }
+        }
       }
       return { content: [{ type: "text", text: `Wrote ${rows.length} row(s) to ${name}.duckdb / ${table}` }] };
     }
@@ -443,7 +452,8 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
     },
     async ({ name, table, condition }) => {
       const fp = wsResolveFile(name, ".duckdb");
-      await runExec(fp, `DELETE FROM "${table.replace(/"/g, '""')}" WHERE ${condition}`);
+      const tableDir = path.dirname(fp);
+      await runExec(fp, `DELETE FROM "${table.replace(/"/g, '""')}" WHERE ${condition}`, tableDir);
       return { content: [{ type: "text", text: `Deleted rows from ${name}.duckdb / ${table} WHERE ${condition}` }] };
     }
   );
