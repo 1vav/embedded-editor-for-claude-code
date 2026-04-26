@@ -32,7 +32,7 @@ import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
-import { runQuery, runExec, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
+import { runQuery, runExec, queryCsv, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -248,7 +248,7 @@ function safeName(raw) {
     // but the name segment may carry extra encoding from the client).
     const decoded = decodeURIComponent(String(raw || ""));
     // Strip all three supported extensions
-    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb|pdf)$/i, "");
+    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb|pdf|csv)$/i, "");
     return validateName(stripped);
   } catch {
     return null;
@@ -478,6 +478,24 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           });
           return res.end(buf);
         } catch { return json(res, { error: "not found" }, 404); }
+      }
+
+      // ── CSVs list
+      if (pathname === "/api/csvs") {
+        const files = await glob("**/*.csv", { cwd: CWD, ignore: ["node_modules/**"] });
+        return json(res, files.map(f => f.replace(/\.csv$/, "")).sort());
+      }
+
+      // ── CSV query
+      const csvm = pathname.match(/^\/api\/csv\/(.+)$/);
+      if (csvm) {
+        const name = safeName(csvm[1]);
+        if (!name) return json(res, { error: "invalid name" }, 400);
+        const fp = path.join(CWD, `${name}.csv`);
+        try {
+          const result = await queryCsv(fp);
+          return json(res, result);
+        } catch (e) { return json(res, { error: e.message }, 400); }
       }
 
       // ── Recent
