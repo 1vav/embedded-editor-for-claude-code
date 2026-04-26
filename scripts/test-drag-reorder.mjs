@@ -73,3 +73,40 @@ test("list with 1 item produces no group", () => {
   const groups = parseBlocks(makeState(doc));
   assert.equal(groups.length, 0);
 });
+
+test("three H2 sections form one group of 3", () => {
+  const doc = `## Alpha\nContent A\n## Beta\nContent B\n## Gamma\nContent C\n`;
+  const groups = parseBlocks(makeState(doc));
+  const sectionGroups = groups.filter(g => g.type === "sections");
+  assert.equal(sectionGroups.length, 1);
+  assert.equal(sectionGroups[0].blocks.length, 3);
+  const texts = sectionGroups[0].blocks.map(b => doc.slice(b.from, b.to));
+  assert.equal(texts[0], "## Alpha\nContent A\n");
+  assert.equal(texts[1], "## Beta\nContent B\n");
+  assert.equal(texts[2], "## Gamma\nContent C\n");
+});
+
+test("H2 containing H3 sub-sections: H2s and H3s are separate groups", () => {
+  const doc = `## Ch1\n### S1.1\nA\n### S1.2\nB\n## Ch2\nC\n`;
+  const groups = parseBlocks(makeState(doc));
+  const sectionGroups = groups.filter(g => g.type === "sections");
+  assert.equal(sectionGroups.length, 2);
+  const h2g = sectionGroups.find(g => doc.slice(g.blocks[0].from, g.blocks[0].from + 3) === "## ");
+  assert.ok(h2g);
+  assert.equal(h2g.blocks.length, 2);
+  const h3g = sectionGroups.find(g => doc.slice(g.blocks[0].from, g.blocks[0].from + 4) === "### ");
+  assert.ok(h3g);
+  assert.equal(h3g.blocks.length, 2);
+});
+
+test("single heading produces no section group", () => {
+  const doc = `## Only\nContent\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.filter(g => g.type === "sections").length, 0);
+});
+
+test("H1 followed by H2: no sibling group formed", () => {
+  const doc = `# Title\n## Sub\nContent\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.filter(g => g.type === "sections").length, 0);
+});

@@ -24,6 +24,7 @@ export function parseBlocks(state) {
   const groups = [];
   groups.push(...parseTableRowGroups(state));
   groups.push(...parseListItemGroups(state));
+  groups.push(...parseSectionGroups(state));
   return groups;
 }
 
@@ -105,6 +106,65 @@ function parseListItemGroups(state) {
   });
 
   return groups;
+}
+
+function parseSectionGroups(state) {
+  const docLen = state.doc.length;
+
+  // 1. Collect all ATX headings in document order.
+  const headings = [];
+  syntaxTree(state).iterate({
+    enter(node) {
+      const m = node.name.match(/^ATXHeading([1-6])$/);
+      if (!m) return;
+      headings.push({
+        level: parseInt(m[1]),
+        from: state.doc.lineAt(node.from).from,
+      });
+    },
+  });
+
+  if (headings.length < 2) return [];
+
+  // 2. Compute section `to` for each heading:
+  //    section.to = start of next heading with level <= this heading's level, or EOF.
+  const sections = headings.map((h, i) => {
+    const next = headings.slice(i + 1).find(h2 => h2.level <= h.level);
+    const to = next ? next.from : docLen;
+    return { from: h.from, to, level: h.level };
+  });
+
+  // 3. Group same-level sibling sections.
+  //    Two sections at the same level are siblings iff one ends exactly where the other begins
+  //    (i.e. s[j].to === s[k].from for some j,k at same level). We scan per-level.
+  const levels = [...new Set(sections.map(s => s.level))];
+  const siblingGroups = [];
+  for (const level of levels) {
+    const levelSections = sections.filter(s => s.level === level);
+    // Within the same level, group consecutive sections where s[i].to === s[i+1].from
+    let current = [levelSections[0]];
+    for (let i = 1; i < levelSections.length; i++) {
+      const prev = levelSections[i - 1];
+      const curr = levelSections[i];
+      if (curr.from === prev.to) {
+        current.push(curr);
+      } else {
+        if (current.length >= 2) siblingGroups.push(current);
+        current = [curr];
+      }
+    }
+    if (current.length >= 2) siblingGroups.push(current);
+  }
+
+  // 4. Convert to BlockGroup format.
+  //    For non-last blocks, s.to = next_heading.from (a line start), so
+  //    doc.slice(s.from, s.to) already includes the trailing \n.
+  //    For the last block, s.to = docLen, so doc.slice(s.from, docLen) also includes
+  //    any trailing \n.
+  return siblingGroups.map(group => {
+    const blocks = group.map(s => ({ from: s.from, to: s.to }));
+    return { type: "sections", blocks };
+  });
 }
 
 export function makeDragReorderPlugin() {
