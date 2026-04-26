@@ -8,6 +8,7 @@ import { glob } from "glob";
 import { renderToPngBase64 } from "./render.js";
 import { ROOT, resolveFile as wsResolveFile, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
 import { derivePort } from "./paths.js";
+import { runQuery, runExec } from "./duck.js";
 
 const HIST_DIR = path.join(ROOT, ".excalidraw-history");
 
@@ -336,6 +337,145 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
           await previewContent(snap),
         ],
       };
+    }
+  );
+
+  // ── DuckDB: list_tables ─────────────────────────────────────────────────────
+  server.tool(
+    "list_tables",
+    "List all .duckdb table files in the workspace",
+    {},
+    async () => {
+      const files = await glob("**/*.duckdb", { cwd: ROOT, ignore: ["node_modules/**"] });
+      const names = files.map(f => f.replace(/\.duckdb$/, "")).sort();
+      return { content: [{ type: "text", text: names.length ? names.join("\n") : "(no tables)" }] };
+    }
+  );
+
+  // ── DuckDB: create_table ────────────────────────────────────────────────────
+  server.tool(
+    "create_table",
+    "Create a new .duckdb file with a schema. Use CREATE TABLE SQL for schema.",
+    {
+      name:       z.string().describe("Table file name (without .duckdb extension)"),
+      schema:     z.string().optional().describe("CREATE TABLE SQL statement(s) to run after creating the file"),
+      created_by: z.enum(["table", "query"]).optional().default("table").describe("'table' for managed tables, 'query' for query views"),
+    },
+    async ({ name, schema, created_by = "table" }) => {
+      const fp = wsResolveFile(name, ".duckdb");
+      try { await fs.access(fp); return { content: [{ type: "text", text: `${name}.duckdb already exists.` }] }; } catch {}
+      const tableDir = path.dirname(fp);
+      await fs.mkdir(tableDir, { recursive: true });
+      const safeCreatedBy = String(created_by).replace(/'/g, "''");
+      await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+      await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', '${safeCreatedBy}')`);
+      if (schema) await runExec(fp, schema, tableDir);
+      return { content: [{ type: "text", text: `Created ${name}.duckdb` }] };
+    }
+  );
+
+  // ── DuckDB: read_table ──────────────────────────────────────────────────────
+  server.tool(
+    "read_table",
+    "Read rows from a .duckdb table. Returns a markdown table.",
+    {
+      name:     z.string().describe("Table file name (without .duckdb extension)"),
+      table:    z.string().optional().describe("SQL table name inside the file (defaults to first user table)"),
+      where:    z.string().optional().describe("WHERE clause (without the WHERE keyword)"),
+      order_by: z.string().optional().describe("ORDER BY clause (without ORDER BY)"),
+      limit:    z.number().optional().default(50).describe("Max rows to return"),
+    },
+    async ({ name, table, where, order_by, limit = 50 }) => {
+      const fp = wsResolveFile(name, ".duckdb");
+      const tableDir = path.dirname(fp);
+      let tbl = table;
+      if (!tbl) {
+        const { rows } = await runQuery(fp, `SELECT table_name FROM information_schema.tables WHERE table_schema='main' AND table_name NOT LIKE '_ee_%' LIMIT 1`);
+        if (!rows.length) return { content: [{ type: "text", text: `${name}.duckdb has no user tables yet.` }] };
+        tbl = rows[0].table_name;
+      }
+      let sql = `SELECT * FROM "${tbl}"`;
+      if (where)    sql += ` WHERE ${where}`;
+      if (order_by) sql += ` ORDER BY ${order_by}`;
+      sql += ` LIMIT ${Number(limit)}`;
+      const { columns, rows, rowCount } = await runQuery(fp, sql, tableDir);
+      if (!rows.length) return { content: [{ type: "text", text: `${name}.duckdb / ${tbl}: 0 rows` }] };
+      const header = `| ${columns.join(" | ")} |`;
+      const sep    = `| ${columns.map(() => "---").join(" | ")} |`;
+      const body   = rows.map(r => `| ${columns.map(c => String(r[c] ?? "")).join(" | ")} |`).join("\n");
+      return { content: [{ type: "text", text: `${name}.duckdb / ${tbl} (${rowCount} rows)\n\n${header}\n${sep}\n${body}` }] };
+    }
+  );
+
+  // ── DuckDB: write_rows ──────────────────────────────────────────────────────
+  server.tool(
+    "write_rows",
+    "Insert or upsert rows into a table inside a .duckdb file.",
+    {
+      name:  z.string().describe("Table file name (without .duckdb extension)"),
+      table: z.string().describe("SQL table name inside the file"),
+      rows:  z.array(z.record(z.string(), z.unknown())).describe("Array of row objects to insert or replace"),
+    },
+    async ({ name, table, rows }) => {
+      const fp = wsResolveFile(name, ".duckdb");
+      const tableDir = path.dirname(fp);
+      for (const row of rows) {
+        const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+        const vals = Object.values(row).map(v =>
+          v === null || v === undefined ? "NULL"
+          : typeof v === "string" ? `'${v.replace(/'/g, "''")}'`
+          : v
+        ).join(", ");
+        await runExec(fp, `INSERT OR REPLACE INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+      }
+      return { content: [{ type: "text", text: `Wrote ${rows.length} row(s) to ${name}.duckdb / ${table}` }] };
+    }
+  );
+
+  // ── DuckDB: delete_rows ─────────────────────────────────────────────────────
+  server.tool(
+    "delete_rows",
+    "Delete rows from a table in a .duckdb file matching a condition.",
+    {
+      name:      z.string().describe("Table file name (without .duckdb extension)"),
+      table:     z.string().describe("SQL table name inside the file"),
+      condition: z.string().describe("WHERE condition (without WHERE keyword), e.g. 'id = 5'"),
+    },
+    async ({ name, table, condition }) => {
+      const fp = wsResolveFile(name, ".duckdb");
+      await runExec(fp, `DELETE FROM "${table.replace(/"/g, '""')}" WHERE ${condition}`);
+      return { content: [{ type: "text", text: `Deleted rows from ${name}.duckdb / ${table} WHERE ${condition}` }] };
+    }
+  );
+
+  // ── DuckDB: query_table ─────────────────────────────────────────────────────
+  server.tool(
+    "query_table",
+    "Run arbitrary SQL against a .duckdb file. Paths like './subdir/*.csv' in read_csv() resolve relative to the .duckdb file's directory.",
+    {
+      name:    z.string().describe("Table file name (without .duckdb extension)"),
+      sql:     z.string().describe("SQL to execute. May reference read_csv('./path'), read_json('./path')."),
+      save_as: z.string().optional().describe("If provided, INSERT results into this table name (table must exist)"),
+    },
+    async ({ name, sql: sqlStr, save_as }) => {
+      const fp = wsResolveFile(name, ".duckdb");
+      const tableDir = path.dirname(fp);
+      const { columns, rows, rowCount } = await runQuery(fp, sqlStr, tableDir);
+      if (save_as && rows.length) {
+        for (const row of rows) {
+          const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+          const vals = Object.values(row).map(v =>
+            v === null ? "NULL" : `'${String(v).replace(/'/g, "''")}'`
+          ).join(", ");
+          await runExec(fp, `INSERT OR REPLACE INTO "${save_as.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`);
+        }
+        return { content: [{ type: "text", text: `Inserted ${rowCount} rows into ${name}.duckdb / ${save_as}` }] };
+      }
+      if (!rows.length) return { content: [{ type: "text", text: `Query returned 0 rows` }] };
+      const header = `| ${columns.join(" | ")} |`;
+      const sep    = `| ${columns.map(() => "---").join(" | ")} |`;
+      const body   = rows.map(r => `| ${columns.map(c => String(r[c] ?? "")).join(" | ")} |`).join("\n");
+      return { content: [{ type: "text", text: `${rowCount} rows\n\n${header}\n${sep}\n${body}` }] };
     }
   );
 }
