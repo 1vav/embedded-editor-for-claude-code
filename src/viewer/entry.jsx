@@ -9,6 +9,7 @@ import "tldraw/tldraw.css";
 import MarkdownIt from "markdown-it";
 import { TableView, TableEmbed } from "./DuckDBView.jsx";
 import { PdfView } from "./PdfView.jsx";
+import { CsvView } from "./CsvView.jsx";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
@@ -662,7 +663,7 @@ function ColorPicker({ colorId, onChange }) {
 
 // ─── File Dropdown ────────────────────────────────────────────────────────────
 
-function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, recent, active, onOpen, onDelete, onClose }) {
+function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, active, onOpen, onDelete, onClose }) {
   const T = useT();
   const [q,            setQ]            = useState("");
   const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code | data
@@ -683,6 +684,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdf
     ...(codeFiles || []).map(n => ({ name: n, type: "code" })),
     ...(tableFiles || []).map(n => ({ name: n, type: "table" })),
     ...(pdfFiles || []).map(n => ({ name: n, type: "pdf" })),
+    ...(csvFiles || []).map(n => ({ name: n, type: "csv" })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   const shown = allFiles.filter(f => {
@@ -691,6 +693,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdf
     if (filter === "code"     && f.type !== "code")    return false;
     if (filter === "data"     && f.type !== "table")   return false;
     if (filter === "pdf"      && f.type !== "pdf")     return false;
+    if (filter === "csv"      && f.type !== "csv")     return false;
     return !q || f.name.toLowerCase().includes(q.toLowerCase());
   });
 
@@ -700,6 +703,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdf
     if (filter === "code"     && r.type !== "code")    return false;
     if (filter === "data"     && r.type !== "table")   return false;
     if (filter === "pdf"      && r.type !== "pdf")     return false;
+    if (filter === "csv"      && r.type !== "csv")     return false;
     return !q || r.name.toLowerCase().includes(q.toLowerCase());
   }).slice(0, 6);
 
@@ -722,7 +726,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdf
             padding: "5px 8px", outline: "none",
           }} />
         <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
-          {["all","drawings","notes","code","data","pdf"].map(f => (
+          {["all","drawings","notes","code","data","pdf","csv"].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
               background: filter === f ? T.surface3 : "transparent",
               border: `1px solid ${filter === f ? T.border2 : "transparent"}`,
@@ -799,8 +803,8 @@ function DropSection({ label, children }) {
 function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, title }) {
   const T = useT();
   const [h, sH] = useState(false);
-  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : (type === "table" || type === "pdf") ? null : "¶";
-  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : type === "pdf" ? T.muted : T.blue;
+  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : (type === "table" || type === "pdf" || type === "csv") ? null : "¶";
+  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : type === "pdf" ? T.muted : type === "csv" ? T.muted : T.blue;
   return (
     <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
       title={title} style={{
@@ -814,7 +818,9 @@ function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, titl
         ? <DuckBrandIcon size={10} />
         : type === "pdf"
           ? <span style={{ fontSize: 9, color: T.muted, flexShrink: 0, fontFamily: T.mono }}>PDF</span>
-          : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+          : type === "csv"
+            ? <span style={{ fontSize: 9, color: T.muted, flexShrink: 0, fontFamily: T.mono }}>CSV</span>
+            : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
       }
       <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
         color: active ? T.text : T.textDim, whiteSpace: "nowrap" }}>{midTruncate(name)}</span>
@@ -966,7 +972,7 @@ function BrandMark({ onHome }) {
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, connected,
-  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, recent, onOpen, onDelete }) {
+  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, onOpen, onDelete }) {
   const T = useT();
   const [dropOpen,  setDropOpen]  = useState(false);
   const [canLeft,   setCanLeft]   = useState(false);
@@ -1036,7 +1042,7 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
         </Ghost>
         {dropOpen && (
           <FileDropdown
-            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles}
+            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles} csvFiles={csvFiles}
             recent={recent} active={active}
             onOpen={(name, type) => { onOpen(name, type); }}
             onDelete={onDelete}
@@ -2272,6 +2278,7 @@ function App() {
   const [codeFiles,   setCodeFiles]   = useState([]);
   const [tableFiles,  setTableFiles]  = useState([]);
   const [pdfFiles,    setPdfFiles]    = useState([]);
+  const [csvFiles,    setCsvFiles]    = useState([]);
   const [recent,      setRecent]      = useState([]); // [{name, type, at}]
   const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem("ee-tabs") ?? "[]"); } catch { return []; } });
   const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem("ee-active") ?? "null"); } catch { return null; } });
@@ -2290,6 +2297,7 @@ function App() {
     setDiagrams(d); setTldrawFiles(tl); setNotes(n); setCodeFiles(c); setRecent(r);
     api.tables().then(setTableFiles).catch(() => {});
     fetch("/api/pdfs").then(r => r.json()).then(setPdfFiles).catch(() => {});
+    fetch("/api/csvs").then(r => r.json()).then(setCsvFiles).catch(() => {});
   }, []);
 
   // Lightweight variant — only refreshes the recent list (skips 3 glob scans).
@@ -2351,9 +2359,11 @@ function App() {
       const tldrMatch  = tldrawFiles.find(t => t.toLowerCase() === lo);
       const tableMatch = tableFiles.find(t => t.toLowerCase() === lo);
       const pdfMatch   = pdfFiles.find(p => p.toLowerCase() === lo);
+      const csvMatch   = csvFiles.find(p => p.toLowerCase() === lo);
 
       if      (tableMatch)                               { resolved = "table";   name = tableMatch; }
       else if (pdfMatch)                                 { resolved = "pdf";     name = pdfMatch; }
+      else if (csvMatch)                                 { resolved = "csv";     name = csvMatch; }
       else if (noteMatch && !diagMatch && !tldrMatch)    { resolved = "note";    name = noteMatch; }
       else if (diagMatch && !noteMatch && !tldrMatch)    { resolved = "diagram"; name = diagMatch; }
       else if (tldrMatch && !noteMatch && !diagMatch)    { resolved = "tldraw";  name = tldrMatch; }
@@ -2374,7 +2384,7 @@ function App() {
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
     setActive(tab);
-  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles]);
+  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
@@ -2455,7 +2465,7 @@ function App() {
         connected={connected}
         onExport={() => setShowExp(true)}
         onHistory={() => setShowHist(h => !h)}
-        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles} recent={recent}
+        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles} csvFiles={csvFiles} recent={recent}
         onOpen={openFile} onDelete={handleDelete}
       />
 
@@ -2473,7 +2483,9 @@ function App() {
                     ? <TableView key={active.name + ":table"} name={active.name} T={T} />
                     : active.type === "pdf"
                       ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
-                      : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
+                      : active.type === "csv"
+                        ? <CsvView key={active.name + ":csv"} name={active.name} T={T} />
+                        : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
           }
         </div>
 
