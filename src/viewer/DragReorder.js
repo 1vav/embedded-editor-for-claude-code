@@ -5,7 +5,7 @@
 // Internal:
 //   startDrag / onDragMove / onDragEnd (module-level, not exported)
 
-import { ViewPlugin as _ViewPlugin, Decoration, WidgetType } from "@codemirror/view";
+import { ViewPlugin, Decoration, WidgetType } from "@codemirror/view";
 import { RangeSetBuilder, ChangeSet } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 
@@ -108,7 +108,7 @@ class DragHandleWidget extends WidgetType {
 
 // ── buildHandleDecorations ────────────────────────────────────────────────────
 
-function _buildHandleDecorations(view) {
+function buildHandleDecorations(view) {
   const groups = parseBlocks(view.state);
   const builder = new RangeSetBuilder();
 
@@ -393,6 +393,18 @@ function parseSectionGroups(state) {
 }
 
 export function makeDragReorderPlugin() {
-  // placeholder — implemented in Task 7
-  return [];  // empty extension
+  const plugin = ViewPlugin.fromClass(
+    class {
+      constructor(view) {
+        this.decorations = buildHandleDecorations(view);
+      }
+      update(update) {
+        if (update.docChanged || update.viewportChanged) {
+          this.decorations = buildHandleDecorations(update.view);
+        }
+      }
+    },
+    { decorations: instance => instance.decorations }
+  );
+  return plugin;
 }
