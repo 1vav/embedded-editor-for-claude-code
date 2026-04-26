@@ -50,6 +50,14 @@ export function getDb(filePath) {
   return entry.promise;
 }
 
+export function closeOne(filePath) {
+  const entry = pool.get(filePath);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  try { if (entry.db) entry.db.close(() => {}); } catch {}
+  pool.delete(filePath);
+}
+
 export function closeAll() {
   for (const { db, timer } of pool.values()) {
     clearTimeout(timer);

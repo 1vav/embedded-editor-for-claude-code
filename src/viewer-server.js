@@ -32,7 +32,7 @@ import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
-import { runQuery, runExec, closeAll as duckCloseAll } from "./duck.js";
+import { runQuery, runExec, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -101,7 +101,7 @@ try {
     clearTimeout(debounces.get(filename));
     debounces.set(filename, setTimeout(() => {
       debounces.delete(filename); // #006 fix: avoid unbounded Map growth
-      broadcast(event, event === "table:changed" ? { name, op: "updated" } : { name });
+      broadcast(event, { name });  // no op — let HTTP routes set op; watcher just signals a change
       // Touch recent for diagram/note/tldraw so MCP-created files appear in
       // the recent list even though they never go through the HTTP API.
       if      (event === "diagram:changed") touchRecent(name, "diagram");
@@ -618,8 +618,8 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           if (!body?.table || !Array.isArray(body.rows)) return json(res, { error: "expected {table, rows}" }, 400);
           try {
             for (const row of body.rows) {
-              const cols = Object.keys(row).map(c => `"${c}"`).join(", ");
-              const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null ? "NULL" : v)).join(", ");
+              const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+              const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null || v === undefined ? "NULL" : v)).join(", ");
               await runExec(fp, `INSERT OR REPLACE INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
             }
             broadcast("table:changed", { name, op: "updated" });
@@ -630,6 +630,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         // DELETE /api/table/:name
         if (method === "DELETE" && !isRows && !isQuery) {
           try {
+            duckCloseOne(fp);  // evict from pool before unlinking
             await fs.unlink(fp);
             broadcast("table:deleted", { name, op: "deleted" });
             return json(res, { ok: true });
@@ -788,6 +789,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           return json(res, { error: "path escape" }, 400);
         }
         try {
+          if (type === "table") duckCloseOne(oldFp);  // evict stale pool entry before rename
           await fs.rename(oldFp, newFp);
           const updated = await rewriteLinks(from, to);
           // Update in-memory recent list entries
@@ -796,7 +798,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
               r.name === from && r.type === type ? { ...r, name: to } : r
             );
           }
-          const evType = type === "note" ? "note:changed" : type === "tldraw" ? "tldraw:changed" : "diagram:changed";
+          const evType = type === "table"  ? "table:changed"
+                       : type === "note"   ? "note:changed"
+                       : type === "tldraw" ? "tldraw:changed"
+                       : "diagram:changed";
           broadcast(evType, { name: to, op: "renamed", from: safFrom });
           return json(res, { ok: true, updated });
         } catch (e) { return json(res, { error: e.message }, 500); }

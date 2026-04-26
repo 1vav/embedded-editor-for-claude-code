@@ -562,11 +562,25 @@ export function TableEmbed({ name, T, onOpen }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`/api/table/${enc(name)}`)
-      .then(r => r.json())
-      .then(res => { setResult(res); setLoading(false); })
-      .catch(() => setLoading(false));
-  }, [name]);
+    let cancelled = false;
+    // Step 1: discover the first user table inside this .duckdb file.
+    api.listUserTables(name)
+      .then(({ rows: tableRows }) => {
+        if (cancelled) return;
+        const tbl = tableRows?.[0]?.table_name;
+        if (!tbl) { setLoading(false); return; }
+        // Step 2: fetch up to 10 rows from that table.
+        return api.runQuery(name, `SELECT * FROM "${tbl.replace(/"/g, '""')}" LIMIT 10`);
+      })
+      .then(res => {
+        if (cancelled || !res) return;
+        if (res.error) { setLoading(false); return; }
+        setResult(res);
+        setLoading(false);
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleView() {
     const next = view === "table" ? "chips" : "table";

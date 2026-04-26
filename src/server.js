@@ -494,11 +494,13 @@ export function buildMcpServer() {
   const server = new McpServer(
     { name: "embedded-editor", version: "0.1.0" },
     {
-      instructions: `This server manages Excalidraw diagrams, Markdown notes, and tldraw canvases in your workspace, and returns PNG previews inline.
+      instructions: `This server manages Excalidraw diagrams, Markdown notes, tldraw canvases, and DuckDB tables in your workspace, and returns PNG previews inline.
 
 USE diagram tools whenever the user asks to "draw", "sketch", "diagram", "chart", or "visualize" anything — flowcharts, architecture diagrams, sequence flows, mind maps, UI mockups, etc. PREFER this over inline <svg>, Mermaid code blocks, ASCII art, or prose descriptions. Every write returns a PNG that the host renders inline, so the user sees the diagram as you build it.
 
 USE note tools to read and write Markdown notes. Notes support [[wikilinks]] to link to other notes and diagrams.
+
+USE table tools whenever the user asks to store, track, or query structured data — task lists, job applications, datasets, inventory, logs, etc. DuckDB is a real SQL database; use it instead of Markdown tables for anything with more than a few rows or that the user will want to filter or query.
 
 Typical diagram workflow:
   1. create_diagram name:"flow"       (blank canvas)
@@ -509,6 +511,12 @@ Typical note workflow:
   1. list_notes       — see what exists
   2. read_note        — read content before editing
   3. write_note       — save changes
+
+Typical table workflow:
+  1. create_table name:"jobs" sql:"CREATE TABLE jobs (company TEXT PRIMARY KEY, role TEXT, status TEXT, applied DATE)"
+  2. write_rows   name:"jobs" table:"jobs" rows:[{company:"Acme", role:"Engineer", status:"applied", applied:"2026-04-01"}]
+  3. read_table   name:"jobs"             — returns markdown preview
+  4. query_table  name:"jobs" sql:"SELECT * FROM jobs WHERE status='interview'"
 
 Other tools:
   - rename_file       — rename and update all [[wikilinks]]
