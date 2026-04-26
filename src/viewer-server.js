@@ -101,7 +101,7 @@ try {
     clearTimeout(debounces.get(filename));
     debounces.set(filename, setTimeout(() => {
       debounces.delete(filename); // #006 fix: avoid unbounded Map growth
-      broadcast(event, { name });
+      broadcast(event, event === "table:changed" ? { name, op: "updated" } : { name });
       // Touch recent for diagram/note/tldraw so MCP-created files appear in
       // the recent list even though they never go through the HTTP API.
       if      (event === "diagram:changed") touchRecent(name, "diagram");
@@ -598,7 +598,8 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           try {
             await fs.mkdir(path.dirname(fp), { recursive: true });
             await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
-            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', '${createdBy}')`);
+            const safeCreatedBy = String(createdBy).replace(/'/g, "''");
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', '${safeCreatedBy}')`);
             if (body?.schema) await runExec(fp, body.schema, tableDir);
             touchRecent(name, "table");
             broadcast("table:changed", { name, op: "created" });
@@ -614,7 +615,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
             for (const row of body.rows) {
               const cols = Object.keys(row).map(c => `"${c}"`).join(", ");
               const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null ? "NULL" : v)).join(", ");
-              await runExec(fp, `INSERT INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+              await runExec(fp, `INSERT OR REPLACE INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
             }
             broadcast("table:changed", { name, op: "updated" });
             return json(res, { ok: true, count: body.rows.length });
