@@ -58,7 +58,7 @@ export async function rewriteLinks(oldName, newName) {
       const text = await fs.readFile(fp, "utf8");
       let changed = false;
       const newText = text.replace(
-        /(!?\[\[)([^\]|]+?)(\.(md|excalidraw))?(\|[^\]]+)?(\]\])/g,
+        /(!?\[\[)([^\]|]+?)(\.(md|excalidraw|duckdb))?(\|[^\]]+)?(\]\])/g,
         (match, open, name, ext, _extType, alias, close) => {
           const trimmed = name.trim();
           if (trimmed === oldName || trimmed === oldName + (ext || "")) {
@@ -82,7 +82,7 @@ export async function rewriteLinks(oldName, newName) {
           if (el.link && typeof el.link === "string") {
             const wl = el.link.match(/^\[\[(.+)\]\]$/);
             if (wl) {
-              const ref = wl[1].replace(/\.(md|excalidraw)$/i, "").trim();
+              const ref = wl[1].replace(/\.(md|excalidraw|duckdb)$/i, "").trim();
               if (ref === oldName) { el.link = `[[${newName}]]`; changed = true; }
             }
           }
@@ -101,7 +101,7 @@ export async function findBacklinks(name) {
   const results = [];
   const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const linkRe = new RegExp(
-    `!?\\[\\[${escapedName}(?:\\.(md|excalidraw))?(?:\\|[^\\]]+)?\\]\\]`, "i"
+    `!?\\[\\[${escapedName}(?:\\.(md|excalidraw|duckdb))?(?:\\|[^\\]]+)?\\]\\]`, "i"
   );
 
   const [mdFiles, exFiles] = await Promise.all([
@@ -125,7 +125,7 @@ export async function findBacklinks(name) {
       const hasLink = data.elements?.some(el => {
         if (!el.link) return false;
         const wl = el.link.match(/^\[\[(.+)\]\]$/);
-        return wl && wl[1].replace(/\.(md|excalidraw)$/i, "").trim() === name;
+        return wl && wl[1].replace(/\.(md|excalidraw|duckdb)$/i, "").trim() === name;
       });
       if (hasLink) results.push({ name: fn, type: "diagram" });
     } catch (e) { process.stderr.write(`[embedded-editor] findBacklinks excalidraw error ${f}: ${e.message}\n`); }

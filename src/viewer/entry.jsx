@@ -7,6 +7,7 @@ import "@excalidraw/excalidraw/index.css";
 import { Tldraw, getSnapshot, loadSnapshot, toRichText, createShapeId } from "@tldraw/tldraw";
 import "tldraw/tldraw.css";
 import MarkdownIt from "markdown-it";
+import { TableView, TableEmbed } from "./DuckDBView.jsx";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
@@ -286,6 +287,13 @@ function parseSegments(raw) {
   const tlRe  = /!\[\[([^\]]+\.tldraw)\]\]/gi;
   for (const m of raw.matchAll(excRe)) if (!inCode(m.index)) matches.push({ index: m.index, len: m[0].length, type: "diagram", name: m[1].replace(/\.excalidraw$/i, "").trim() });
   for (const m of raw.matchAll(tlRe))  if (!inCode(m.index)) matches.push({ index: m.index, len: m[0].length, type: "tldraw",  name: m[1].replace(/\.tldraw$/i, "").trim() });
+  const dbRe = /!\[\[([^\]]+\.duckdb)\]\]/gi;
+  for (const m of raw.matchAll(dbRe)) {
+    if (!inCode(m.index)) matches.push({
+      index: m.index, len: m[0].length, type: "duckdb",
+      name: m[1].replace(/\.duckdb$/i, "").trim()
+    });
+  }
   matches.sort((a, b) => a.index - b.index);
 
   const segs = [];
@@ -383,6 +391,7 @@ const DARK = {
   text: "#e0e0e0", textDim: "#999", muted: "#5a5a5a", muted2: "#3a3a3a",
   accent: "#4ade80", blue: "#60a5fa", red: "#f87171", orange: "#fb923c",
   tldraw: "#a78bfa",
+  duck: "#facc15",
   mono: MONO, noteFont: NOTE_FONT, isDark: true, excalidraw: "dark",
 };
 
@@ -392,6 +401,7 @@ const LIGHT = {
   text: "#1a1a18", textDim: "#55554f", muted: "#8a8a85", muted2: "#c8c7c2",
   accent: "#16a34a", blue: "#2563eb", red: "#dc2626", orange: "#c2410c",
   tldraw: "#7c3aed",
+  duck: "#b45309",
   mono: MONO, noteFont: NOTE_FONT, isDark: false, excalidraw: "light",
 };
 
@@ -426,6 +436,9 @@ const api = {
   saveCode:  (n, text, crlf, bom) => fetch(`/api/code/${enc(n)}`, { method: "PUT",  headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, crlf, bom }) }),
   newCode:   (n)          => fetch(`/api/code/${enc(n)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: "", crlf: false, bom: false }) }),
   delCode:   (n)          => fetch(`/api/code/${enc(n)}`, { method: "DELETE" }),
+  tables:    ()            => fetch("/api/tables").then(j),
+  newTable:  (n, createdBy) => fetch(`/api/table/${enc(n)}`, { method: "POST", headers: { "Content-Type": "application/json", "Origin": location.origin }, body: JSON.stringify({ created_by: createdBy }) }),
+  delTable:  (n)           => fetch(`/api/table/${enc(n)}`, { method: "DELETE", headers: { "Origin": location.origin } }),
   resolve:   (n)          => fetch(`/api/resolve/${enc(n)}`).then(j),
   backlinks: (n, type)    => fetch(`/api/backlinks/${enc(n)}?type=${type}`).then(j),
   history:   (n)          => fetch(`/api/history/${enc(n)}`).then(j),
@@ -445,7 +458,7 @@ function useSSE(cb) {
       es = new EventSource("/events");
       es.onopen  = () => setOk(true);
       es.onerror = () => { setOk(false); es.close(); t = setTimeout(connect, 2500); };
-      ["diagram:changed","diagram:deleted","note:changed","note:deleted","tldraw:changed","tldraw:deleted","code:changed"]
+      ["diagram:changed","diagram:deleted","note:changed","note:deleted","tldraw:changed","tldraw:deleted","code:changed","table:changed","table:deleted"]
         .forEach(ev => es.addEventListener(ev, e => ref.current(ev.split(":")[0], ev.split(":")[1], JSON.parse(e.data))));
     };
     connect();
@@ -648,10 +661,10 @@ function ColorPicker({ colorId, onChange }) {
 
 // ─── File Dropdown ────────────────────────────────────────────────────────────
 
-function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active, onOpen, onDelete, onClose }) {
+function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, recent, active, onOpen, onDelete, onClose }) {
   const T = useT();
   const [q,            setQ]            = useState("");
-  const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code
+  const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code | data
   const [openFolders, setOpenFolders] = useState(new Set()); // empty = all collapsed by default
   const ref = useRef();
   useClickOutside(ref, onClose);
@@ -667,12 +680,14 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
     ...(tldrawFiles || []).map(n => ({ name: n, type: "tldraw" })),
     ...notes.map(n => ({ name: n, type: "note" })),
     ...(codeFiles || []).map(n => ({ name: n, type: "code" })),
+    ...(tableFiles || []).map(n => ({ name: n, type: "table" })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   const shown = allFiles.filter(f => {
     if (filter === "drawings" && f.type !== "diagram" && f.type !== "tldraw") return false;
     if (filter === "notes"    && f.type !== "note")    return false;
     if (filter === "code"     && f.type !== "code")    return false;
+    if (filter === "data"     && f.type !== "table")   return false;
     return !q || f.name.toLowerCase().includes(q.toLowerCase());
   });
 
@@ -680,6 +695,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
     if (filter === "drawings" && r.type !== "diagram" && r.type !== "tldraw") return false;
     if (filter === "notes"    && r.type !== "note")    return false;
     if (filter === "code"     && r.type !== "code")    return false;
+    if (filter === "data"     && r.type !== "table")   return false;
     return !q || r.name.toLowerCase().includes(q.toLowerCase());
   }).slice(0, 6);
 
@@ -702,7 +718,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, recent, active,
             padding: "5px 8px", outline: "none",
           }} />
         <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
-          {["all","drawings","notes","code"].map(f => (
+          {["all","drawings","notes","code","data"].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
               background: filter === f ? T.surface3 : "transparent",
               border: `1px solid ${filter === f ? T.border2 : "transparent"}`,
@@ -779,8 +795,8 @@ function DropSection({ label, children }) {
 function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, title }) {
   const T = useT();
   const [h, sH] = useState(false);
-  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : "¶";
-  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : T.blue;
+  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : type === "table" ? null : "¶";
+  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : T.blue;
   return (
     <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
       title={title} style={{
@@ -790,7 +806,10 @@ function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, titl
         borderLeft: `2px solid ${active ? T.accent : "transparent"}`,
         cursor: "pointer", transition: "background .08s", minWidth: 0,
       }}>
-      <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+      {type === "table"
+        ? <DuckBrandIcon size={10} />
+        : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+      }
       <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
         color: active ? T.text : T.textDim, whiteSpace: "nowrap" }}>{midTruncate(name)}</span>
       {sub && <span style={{ color: T.muted, fontSize: 9, fontFamily: T.mono, flexShrink: 0 }}>{sub}</span>}
@@ -897,12 +916,22 @@ const TldrawBrandIcon = ({ size = 13, isDark }) => (
   </svg>
 );
 
+const DuckBrandIcon = ({ size = 14 }) => (
+  <svg width={size} height={Math.round(size * 0.93)} viewBox="0 0 24 22" fill="none" aria-label="duckdb">
+    <ellipse cx="13" cy="14" rx="9" ry="7" fill="#facc15"/>
+    <circle cx="20" cy="7" r="4.5" fill="#facc15"/>
+    <circle cx="21.5" cy="5.5" r="1" fill="#0d0d0d"/>
+    <path d="M23.5 7.5 L26.5 8 L23.5 9Z" fill="#fb923c"/>
+    <ellipse cx="11" cy="13" rx="5" ry="3.5" fill="#facc1566" transform="rotate(-15 11 13)"/>
+  </svg>
+);
+
 function BrandMark({ onHome }) {
   const T = useT();
   const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
   return (
     <div onClick={onHome} title="Home"
-      style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0,
+      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
         paddingRight: 8, borderRight: `1px solid ${T.border2}`,
         cursor: onHome ? "pointer" : "default", opacity: 1 }}>
       <span title="Markdown notes" style={{ display: "flex", color: T.text, opacity: 0.8 }}>
@@ -920,6 +949,10 @@ function BrandMark({ onHome }) {
       <span title="Code editor" style={{ display: "flex" }}>
         <CodeBrandIcon size={14} />
       </span>
+      {dot}
+      <span title="DuckDB tables" style={{ display: "flex" }}>
+        <DuckBrandIcon size={14} />
+      </span>
     </div>
   );
 }
@@ -927,7 +960,7 @@ function BrandMark({ onHome }) {
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, connected,
-  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, recent, onOpen, onDelete }) {
+  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, recent, onOpen, onDelete }) {
   const T = useT();
   const [dropOpen,  setDropOpen]  = useState(false);
   const [canLeft,   setCanLeft]   = useState(false);
@@ -997,7 +1030,7 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
         </Ghost>
         {dropOpen && (
           <FileDropdown
-            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles}
+            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles}
             recent={recent} active={active}
             onOpen={(name, type) => { onOpen(name, type); }}
             onDelete={onDelete}
@@ -1301,11 +1334,13 @@ function TldrawEmbed({ name, onOpen }) {
 // When a file is created with a description, fires a "slash-prompt" CustomEvent
 // so the App-level PromptBar can pre-fill and auto-copy the Claude instruction.
 function makeSlashSource() {
-  const ALL_CMDS = ["diagram", "canvas", "note", "link"];
+  const ALL_CMDS = ["diagram", "canvas", "note", "table", "query", "link"];
   const CMD_DETAIL = {
     diagram: "embed Excalidraw diagram",
     canvas:  "embed tldraw canvas",
     note:    "create & link a note",
+    table:   "create DuckDB table",
+    query:   "create DuckDB query view",
     link:    "link to existing file",
   };
 
@@ -1341,15 +1376,17 @@ function makeSlashSource() {
 
     // /link — show searchable list of all existing files
     if (cmd === "link") {
-      const [diagrams, notes, tldraws] = await Promise.all([
+      const [diagrams, notes, tldraws, tables] = await Promise.all([
         api.diagrams().catch(() => []),
         api.notes().catch(() => []),
         api.tldrawList().catch(() => []),
+        api.tables().catch(() => []),
       ]);
       const allOpts = [
         ...diagrams.map(n => ({ label: n, detail: "⬡ diagram", ftype: "diagram" })),
         ...notes.map(n =>    ({ label: n, detail: "¶ note",    ftype: "note"    })),
         ...tldraws.map(n =>  ({ label: n, detail: "◈ canvas",  ftype: "tldraw"  })),
+        ...tables.map(n =>   ({ label: n, detail: "⬡ table",   ftype: "duckdb"  })),
       ];
       const opts = desc
         ? allOpts.filter(o => o.label.toLowerCase().includes(desc.toLowerCase()))
@@ -1360,7 +1397,8 @@ function makeSlashSource() {
           label: o.label, detail: o.detail,
           apply(view, _, from) {
             const lineEnd = view.state.doc.lineAt(from).to;
-            const insert  = o.ftype === "diagram" ? `![[${o.label}.excalidraw]]`
+            const insert  = o.ftype === "duckdb"  ? `![[${o.label}.duckdb]]`
+                          : o.ftype === "diagram" ? `![[${o.label}.excalidraw]]`
                           : o.ftype === "tldraw"  ? `![[${o.label}.tldraw]]`
                           : `[[${o.label}]]`;
             view.dispatch({ changes: { from, to: lineEnd, insert }, selection: { anchor: from + insert.length } });
@@ -1379,7 +1417,9 @@ function makeSlashSource() {
         async apply(view, _, from) {
           // Auto-generate a short unique name — the description is the Claude prompt, not the filename
           const id   = Date.now().toString(36);          // e.g. "m5j3k2"
-          const name = `${cmd}-${id}`;
+          const name = cmd === "table" ? `table-${id}`
+                     : cmd === "query" ? `query-${id}`
+                     : `${cmd}-${id}`;
           const lineEnd = view.state.doc.lineAt(from).to;
           let insert, claudePrompt;
           try {
@@ -1395,6 +1435,14 @@ function makeSlashSource() {
               await api.newNote(name);
               insert = `[[${name}]]`;
               if (desc) claudePrompt = `${desc}\n\nNote file: [[${name}]] (already created). Use the write_note MCP tool to populate it.`;
+            } else if (cmd === "table") {
+              await api.newTable(name, "table");
+              insert = `![[${name}.duckdb]]`;
+              if (desc) claudePrompt = `${desc}\n\nTable file: [[${name}.duckdb]] (already created). Use create_table to define the schema (provide the table name and a CREATE TABLE SQL statement), then write_rows to populate it.`;
+            } else if (cmd === "query") {
+              await api.newTable(name, "query");
+              insert = `![[${name}.duckdb]]`;
+              if (desc) claudePrompt = `${desc}\n\nQuery file: [[${name}.duckdb]] (already created). Use query_table to scan files relative to this table's directory (supports read_csv('./glob'), read_json('./glob')) and save results as rows.`;
             }
           } catch (e) {
             console.error("[slash-cmd] create failed:", e);
@@ -1679,6 +1727,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
               {segs.map((seg) =>
                 seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} />
                 : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} />
+                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} />
                 : <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text) }} />
               )}
             </div>
@@ -1904,9 +1953,11 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ display: "flex" }}><TldrawBrandIcon size={30} isDark={T.isDark} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex" }}><CodeBrandIcon size={30} /></span>
+        <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
+        <span style={{ display: "flex", color: "#facc15" }}><DuckBrandIcon size={30} /></span>
       </div>
       <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
-      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · wikilinks</div>
+      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
           <div style={{ color: T.muted, fontSize: 9, letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>RECENT</div>
@@ -2161,10 +2212,22 @@ function PromptBar({ active }) {
     const label = active.type === "diagram" ? `diagram "${active.name}"` : `note "${active.name}.md"`;
     const text  = val.trim().startsWith("Please ") ? val.trim()
                 : `Update the ${label}: ${val.trim()}`;
-    navigator.clipboard.writeText(text).then(() => {
-      setVal(""); setToast("copied — paste into claude ⌘V");
-      setTimeout(() => setToast(""), 3000);
-    }).catch(() => setToast("clipboard unavailable"));
+    const done = () => { setVal(""); setToast("copied — paste into claude ⌘V"); setTimeout(() => setToast(""), 3000); };
+    const fallback = () => {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.cssText = "position:fixed;opacity:0;top:0;left:0";
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        done();
+      } catch { setToast("clipboard unavailable"); }
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
   };
 
   return (
@@ -2201,6 +2264,7 @@ function App() {
   const [tldrawFiles, setTldrawFiles] = useState([]);
   const [notes,       setNotes]       = useState([]);
   const [codeFiles,   setCodeFiles]   = useState([]);
+  const [tableFiles,  setTableFiles]  = useState([]);
   const [recent,      setRecent]      = useState([]); // [{name, type, at}]
   const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem("ee-tabs") ?? "[]"); } catch { return []; } });
   const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem("ee-active") ?? "null"); } catch { return null; } });
@@ -2217,6 +2281,7 @@ function App() {
   const refresh = useCallback(async () => {
     const [d, tl, n, c, r] = await Promise.all([api.diagrams(), api.tldrawList(), api.notes(), api.codeFiles(), api.recent()]);
     setDiagrams(d); setTldrawFiles(tl); setNotes(n); setCodeFiles(c); setRecent(r);
+    api.tables().then(setTableFiles).catch(() => {});
   }, []);
 
   // Lightweight variant — only refreshes the recent list (skips 3 glob scans).
@@ -2236,6 +2301,11 @@ function App() {
       // "created", "deleted", "renamed", or unknown op all require a full refresh.
       if (data.op === "updated") refreshRecent();
       else refresh();
+    }
+    if (kind === "table") {
+      // "changed" with op=updated is already handled by refreshRecent() in the generic branch above
+      if (ev === "changed" && data?.op !== "updated") refresh();
+      if (ev === "deleted") refresh();
     }
     if (ev === "deleted" || (kind === "code" && data.op === "deleted")) {
       const type = kind === "code" ? "code" : kind;
@@ -2268,13 +2338,15 @@ function App() {
         return;
       }
       const lo = rawName.toLowerCase();
-      const noteMatch = notes.find(n => n.toLowerCase() === lo);
-      const diagMatch = diagrams.find(d => d.toLowerCase() === lo);
-      const tldrMatch = tldrawFiles.find(t => t.toLowerCase() === lo);
+      const noteMatch  = notes.find(n => n.toLowerCase() === lo);
+      const diagMatch  = diagrams.find(d => d.toLowerCase() === lo);
+      const tldrMatch  = tldrawFiles.find(t => t.toLowerCase() === lo);
+      const tableMatch = tableFiles.find(t => t.toLowerCase() === lo);
 
-      if      (noteMatch && !diagMatch && !tldrMatch) { resolved = "note";    name = noteMatch; }
-      else if (diagMatch && !noteMatch && !tldrMatch) { resolved = "diagram"; name = diagMatch; }
-      else if (tldrMatch && !noteMatch && !diagMatch) { resolved = "tldraw";  name = tldrMatch; }
+      if      (tableMatch)                               { resolved = "table";   name = tableMatch; }
+      else if (noteMatch && !diagMatch && !tldrMatch)    { resolved = "note";    name = noteMatch; }
+      else if (diagMatch && !noteMatch && !tldrMatch)    { resolved = "diagram"; name = diagMatch; }
+      else if (tldrMatch && !noteMatch && !diagMatch)    { resolved = "tldraw";  name = tldrMatch; }
       else if (!noteMatch && !diagMatch && !tldrMatch) {
         try {
           const r = await api.resolve(rawName);
@@ -2292,7 +2364,7 @@ function App() {
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
     setActive(tab);
-  }, [notes, diagrams, tldrawFiles]);
+  }, [notes, diagrams, tldrawFiles, tableFiles]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
@@ -2329,6 +2401,7 @@ function App() {
     if (type === "diagram") await api.delDiag(name);
     else if (type === "tldraw") await api.delTldraw(name);
     else if (type === "code") await api.delCode(name);
+    else if (type === "table") await api.delTable(name);
     else await api.delNote(name);
     // Evict scroll cache entries for deleted note
     noteScrollCache.delete(`${name}:preview`);
@@ -2372,7 +2445,7 @@ function App() {
         connected={connected}
         onExport={() => setShowExp(true)}
         onHistory={() => setShowHist(h => !h)}
-        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} recent={recent}
+        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} recent={recent}
         onOpen={openFile} onDelete={handleDelete}
       />
 
@@ -2386,7 +2459,9 @@ function App() {
                 ? <TldrawEditor key={active.name + ":tldraw"} name={active.name} onUserSave={handleUserSave} />
                 : active.type === "code"
                   ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
-                  : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
+                  : active.type === "table"
+                    ? <TableView key={active.name + ":table"} name={active.name} T={T} />
+                    : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
           }
         </div>
 

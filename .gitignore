@@ -29,3 +29,9 @@ vendor/
 .todos-archive/
 .mcp.json
 todos/
+
+# Git worktrees
+.worktrees/
+
+# Brainstorm mockups
+.superpowers/
