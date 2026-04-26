@@ -38,3 +38,38 @@ test("table with 0 body rows produces no group", () => {
   const groups = parseBlocks(makeState(doc));
   assert.equal(groups.length, 0);
 });
+
+test("bullet list with 3 items produces one listItems group", () => {
+  const doc = `- Alpha\n- Beta\n- Gamma\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].type, "listItems");
+  assert.equal(groups[0].blocks.length, 3);
+  assert.equal(groups[0].ordered, false);
+  const texts = groups[0].blocks.map(b => doc.slice(b.from, b.to));
+  assert.equal(texts[0], "- Alpha\n");
+  assert.equal(texts[1], "- Beta\n");
+  assert.equal(texts[2], "- Gamma\n");
+});
+
+test("ordered list with 2 items has ordered:true", () => {
+  const doc = `1. First\n2. Second\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].ordered, true);
+  assert.equal(groups[0].blocks.length, 2);
+});
+
+test("nested list: outer and inner are separate groups", () => {
+  const doc = `- Outer A\n  - Inner 1\n  - Inner 2\n- Outer B\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.length, 2);
+  const types = groups.map(g => g.type);
+  assert.ok(types.every(t => t === "listItems"));
+});
+
+test("list with 1 item produces no group", () => {
+  const doc = `- Only item\n`;
+  const groups = parseBlocks(makeState(doc));
+  assert.equal(groups.length, 0);
+});

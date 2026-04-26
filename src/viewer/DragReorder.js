@@ -23,7 +23,7 @@ let _activeDrag = null;
 export function parseBlocks(state) {
   const groups = [];
   groups.push(...parseTableRowGroups(state));
-  // listItems and sections added in later tasks
+  groups.push(...parseListItemGroups(state));
   return groups;
 }
 
@@ -69,6 +69,38 @@ function parseTableRowGroups(state) {
       }
 
       return false; // don't recurse into Table
+    },
+  });
+
+  return groups;
+}
+
+function parseListItemGroups(state) {
+  const groups = [];
+  const docLen = state.doc.length;
+
+  syntaxTree(state).iterate({
+    enter(node) {
+      const isBullet  = node.name === "BulletList";
+      const isOrdered = node.name === "OrderedList";
+      if (!isBullet && !isOrdered) return;
+
+      const items = [];
+      let child = node.node.firstChild;
+      while (child) {
+        if (child.name === "ListItem") {
+          const from = state.doc.lineAt(child.from).from;
+          const lineEnd = state.doc.lineAt(child.to).to;
+          const to = lineEnd + 1 <= docLen ? lineEnd + 1 : lineEnd;
+          items.push({ from, to });
+        }
+        child = child.nextSibling;
+      }
+
+      if (items.length >= 2) {
+        groups.push({ type: "listItems", blocks: items, ordered: isOrdered });
+      }
+      // Do NOT return false — recurse into list items to find nested lists
     },
   });
 
