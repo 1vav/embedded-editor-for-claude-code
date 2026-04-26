@@ -82,7 +82,7 @@ export async function rewriteLinks(oldName, newName) {
           if (el.link && typeof el.link === "string") {
             const wl = el.link.match(/^\[\[(.+)\]\]$/);
             if (wl) {
-              const ref = wl[1].replace(/\.(md|excalidraw)$/i, "").trim();
+              const ref = wl[1].replace(/\.(md|excalidraw|duckdb)$/i, "").trim();
               if (ref === oldName) { el.link = `[[${newName}]]`; changed = true; }
             }
           }
@@ -125,7 +125,7 @@ export async function findBacklinks(name) {
       const hasLink = data.elements?.some(el => {
         if (!el.link) return false;
         const wl = el.link.match(/^\[\[(.+)\]\]$/);
-        return wl && wl[1].replace(/\.(md|excalidraw)$/i, "").trim() === name;
+        return wl && wl[1].replace(/\.(md|excalidraw|duckdb)$/i, "").trim() === name;
       });
       if (hasLink) results.push({ name: fn, type: "diagram" });
     } catch (e) { process.stderr.write(`[embedded-editor] findBacklinks excalidraw error ${f}: ${e.message}\n`); }
