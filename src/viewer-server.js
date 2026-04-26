@@ -248,7 +248,7 @@ function safeName(raw) {
     // but the name segment may carry extra encoding from the client).
     const decoded = decodeURIComponent(String(raw || ""));
     // Strip all three supported extensions
-    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb)$/i, "");
+    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb|pdf)$/i, "");
     return validateName(stripped);
   } catch {
     return null;
@@ -455,6 +455,29 @@ export async function startViewerServer(port = DEFAULT_PORT) {
       if (pathname === "/api/tables") {
         const files = await glob("**/*.duckdb", { cwd: CWD, ignore: ["node_modules/**"] });
         return json(res, files.map(f => f.replace(/\.duckdb$/, "")).sort());
+      }
+
+      // ── PDFs list
+      if (pathname === "/api/pdfs") {
+        const files = await glob("**/*.pdf", { cwd: CWD, ignore: ["node_modules/**"] });
+        return json(res, files.map(f => f.replace(/\.pdf$/, "")).sort());
+      }
+
+      // ── PDF inline serving
+      const pdfm = pathname.match(/^\/api\/pdf\/(.+)$/);
+      if (pdfm) {
+        const name = safeName(pdfm[1]);
+        if (!name) return json(res, { error: "invalid name" }, 400);
+        const fp = path.join(CWD, `${name}.pdf`);
+        try {
+          const buf = await fs.readFile(fp);
+          res.writeHead(200, {
+            "Content-Type": "application/pdf",
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+          });
+          return res.end(buf);
+        } catch { return json(res, { error: "not found" }, 404); }
       }
 
       // ── Recent
@@ -903,7 +926,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
               "Cache-Control": "no-cache",
             };
             // Force download for active-content types to prevent script execution
-            if (mediaExt === ".svg" || mediaExt === ".pdf") {
+            if (mediaExt === ".svg") {
               headers["Content-Disposition"] = "attachment";
             }
             res.writeHead(200, headers);
