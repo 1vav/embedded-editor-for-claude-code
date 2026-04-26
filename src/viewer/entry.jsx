@@ -24,6 +24,7 @@ import { markdown } from "@codemirror/lang-markdown";
 import { javascript } from "@codemirror/lang-javascript";
 import { python }     from "@codemirror/lang-python";
 import { json as jsonLang } from "@codemirror/lang-json";
+import { makeDragReorderPlugin } from "./DragReorder.js";
 
 // Language loader registry — bundled langs resolve synchronously, lazy ones split into chunks
 const LANG_LOADERS = {
@@ -102,8 +103,8 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
   return EditorView.theme({
     "&":            { height: "100%", background: N.surface, color: N.text },
     ".cm-scroller": { fontFamily: S.noteFont, fontSize: S.fontSize, lineHeight: S.lineHeight, overflow: "auto" },
-    ".cm-content":  { caretColor: N.accent, padding: "28px 32px 60px", maxWidth: S.maxWidth, margin: "0 auto", boxSizing: "content-box", fontFamily: S.noteFont },
-    ".cm-line":     { padding: "0" },
+    ".cm-content":  { caretColor: N.accent, padding: "28px 32px 60px 52px", maxWidth: S.maxWidth, margin: "0 auto", boxSizing: "content-box", fontFamily: S.noteFont },
+    ".cm-line":     { padding: "0", position: "relative" },
     ".cm-activeLine":   { background: N.surface2 + "40" },
     ".cm-selectionBackground, ::selection": { background: N.accent + "30 !important" },
     ".cm-cursor":   { borderLeftColor: N.accent },
@@ -133,6 +134,12 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: N.surface3 },
     ".cm-completionLabel":                            { flex: "1", color: N.text, fontSize: "12px" },
     ".cm-completionDetail":                           { color: N.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
+    // Drag-to-reorder handles
+    ".ee-drag-handle":         { display: "inline-block", width: "0", height: "0", overflow: "visible" },
+    ".ee-drag-handle-btn":     { position: "absolute", left: "-40px", top: "50%", transform: "translateY(-50%)", width: "24px", height: "1.4em", display: "flex", alignItems: "center", justifyContent: "center", cursor: "grab", color: "transparent", userSelect: "none", fontSize: "14px", borderRadius: "4px", transition: "color 0.1s, background 0.08s" },
+    ".cm-line:hover .ee-drag-handle-btn": { color: N.muted },
+    ".ee-drag-handle-btn.ee-active": { color: N.accent, cursor: "grabbing" },
+    ".ee-drag-line":            { position: "absolute", left: "20px", right: "20px", height: "2px", background: N.accent, pointerEvents: "none", display: "none", zIndex: "10", borderRadius: "1px" },
   }, { dark: N.isDark });
 }
 
@@ -1750,6 +1757,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
               return true;
             },
           }),
+          makeDragReorderPlugin(),
         ],
       }),
       parent: cmContainerRef.current,
