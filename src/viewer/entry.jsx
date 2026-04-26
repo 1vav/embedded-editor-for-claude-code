@@ -344,6 +344,115 @@ function renderMd(text) {
 
 function esc(s) { return String(s).replace(/"/g, "&quot;"); }
 
+// Returns { fm: Object|null, body: string } where body has the frontmatter block removed.
+function parseFrontmatter(text) {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { fm: null, body: text };
+  const fm = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([\w][\w-]*):\s*(.*)/);
+    if (!kv) continue;
+    let v = kv[2].trim().replace(/^["']|["']$/g, "");
+    if (v === "true")  { fm[kv[1]] = true;  continue; }
+    if (v === "false") { fm[kv[1]] = false; continue; }
+    const n = Number(v);
+    if (v !== "" && !isNaN(n)) { fm[kv[1]] = n; continue; }
+    if (v.startsWith("[") && v.endsWith("]")) {
+      fm[kv[1]] = v.slice(1, -1).split(",").map(s => s.trim().replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    fm[kv[1]] = v;
+  }
+  return { fm: Object.keys(fm).length ? fm : null, body: text.slice(m[0].length) };
+}
+
+function FrontmatterPanel({ fm, T }) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  if (!fm) return null;
+
+  function renderValue(v) {
+    if (typeof v === "boolean") {
+      return (
+        <span style={{
+          fontSize: 10, padding: "1px 7px", borderRadius: 10,
+          background: v ? "#22c55e22" : T.surface2,
+          color: v ? "#4ade80" : T.muted,
+          border: `1px solid ${v ? "#4ade8044" : T.border2}`,
+          fontFamily: T.mono,
+        }}>{String(v)}</span>
+      );
+    }
+    if (typeof v === "number") {
+      return <span style={{ fontFamily: T.mono, color: T.text }}>{v}</span>;
+    }
+    if (Array.isArray(v)) {
+      return (
+        <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {v.map((item, i) => (
+            <span key={i} style={{
+              fontSize: 10, padding: "1px 7px", borderRadius: 10,
+              background: T.surface2, color: T.textDim,
+              border: `1px solid ${T.border2}`, fontFamily: T.mono,
+            }}>{item}</span>
+          ))}
+        </span>
+      );
+    }
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const d = new Date(v);
+      if (!isNaN(d)) {
+        return <span style={{ color: T.text, fontFamily: T.mono }}>{d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>;
+      }
+    }
+    if (typeof v === "string" && /^https?:\/\//.test(v)) {
+      return (
+        <a href={v} target="_blank" rel="noopener noreferrer"
+          style={{ color: T.accent, fontFamily: T.mono, fontSize: 12, textDecoration: "none" }}>
+          {v.length > 50 ? v.slice(0, 50) + "…" : v}
+        </a>
+      );
+    }
+    return <span style={{ color: T.text, fontFamily: T.mono, fontSize: 12 }}>{String(v)}</span>;
+  }
+
+  return (
+    <div style={{
+      margin: "0 0 16px 0", border: `1px solid ${T.border}`,
+      borderRadius: 6, overflow: "hidden", background: T.surface,
+    }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "6px 12px", cursor: "pointer",
+          background: T.surface2, borderBottom: collapsed ? "none" : `1px solid ${T.border}`,
+        }}
+      >
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: T.muted, textTransform: "uppercase" }}>
+          Properties
+        </span>
+        <span style={{ color: T.muted, fontSize: 10 }}>{collapsed ? "▸" : "▾"}</span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: "6px 0" }}>
+          {Object.entries(fm).map(([k, v]) => (
+            <div key={k} style={{
+              display: "flex", alignItems: "flex-start", gap: 12,
+              padding: "4px 12px",
+            }}>
+              <span style={{
+                fontFamily: T.mono, fontSize: 11, color: T.muted,
+                minWidth: 120, flexShrink: 0, paddingTop: 2,
+              }}>{k}</span>
+              <span style={{ flex: 1 }}>{renderValue(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
 const MONO      = "'JetBrains Mono','SF Mono','Cascadia Code',Menlo,monospace";
@@ -1686,7 +1795,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
     view.dispatch({ changes: { from: pos, insert: mdSnippet + "\n" } });
   }, [dropPopup]);
 
-  const segs       = useMemo(() => parseSegments(raw), [raw]);
+  const { fm: noteFm, body: rawBody } = useMemo(() => parseFrontmatter(raw), [raw]);
+  const segs       = useMemo(() => parseSegments(rawBody), [rawBody]);
   const noteStyles = useMemo(() => makeNoteStyles(T, S, C), [T, S, C]);
   const N = C ? { ...T, ...C } : T;
 
@@ -1736,6 +1846,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
           }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
+              <FrontmatterPanel fm={noteFm} T={N} />
               {segs.map((seg) =>
                 seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} />
                 : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} />
