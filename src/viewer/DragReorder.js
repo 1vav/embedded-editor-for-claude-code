@@ -88,9 +88,20 @@ function _buildHandleDecorations(view) {
 // ── Drag state machine ────────────────────────────────────────────────────────
 
 function startDrag(view, groupIdx, blockIdx, mouseEvent) {
+  // Guard: cancel any in-progress drag before starting a new one
+  if (activeDrag) {
+    activeDrag.lineEl.remove();
+    if (activeDrag.handleBtn) activeDrag.handleBtn.classList.remove("ee-active");
+    document.removeEventListener("mousemove", onDragMove,    { capture: true });
+    document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
+    document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
+    activeDrag = null;
+  }
+
   const groups = parseBlocks(view.state);
   const group = groups[groupIdx];
   if (!group || group.blocks.length < 2) return;
+  if (blockIdx >= group.blocks.length) return;
 
   // Create a floating insert-line indicator inside view.dom.
   const lineEl = document.createElement("div");
