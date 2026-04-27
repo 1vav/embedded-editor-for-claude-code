@@ -276,11 +276,12 @@ function parseParagraphGroups(state) {
 
   syntaxTree(state).iterate({
     enter(node) {
-      // Only top-level Paragraph nodes (direct children of Document).
       if (node.name !== "Paragraph") return;
-      // Skip paragraphs inside lists or blockquotes (they have non-Document parents).
-      // lezer exposes parent access only via cursor; use the simple heuristic that
-      // a top-level paragraph's from/to lines are at depth 1.
+      // Only include paragraphs that are direct children of Document.
+      // Paragraphs inside blockquotes, list items, etc. must not get handles
+      // because reordering their character offsets would corrupt the surrounding markup.
+      const parentName = node.node.parent?.name;
+      if (parentName !== "Document") return false; // skip and don't recurse
       const line = state.doc.lineAt(node.from);
       const from = line.from;
       const toLine = state.doc.lineAt(node.to);

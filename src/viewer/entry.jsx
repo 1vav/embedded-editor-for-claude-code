@@ -429,10 +429,12 @@ function FrontmatterPanel({ fm, T }) {
     }
     if (typeof v === "string" && /^https?:\/\//.test(v)) {
       return (
-        <a href={v} target="_blank" rel="noopener noreferrer"
-          style={{ color: T.accent, fontFamily: T.mono, fontSize: 12, textDecoration: "none" }}>
+        <span onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText(v).catch(() => {}); }}
+          title={v + " (click to copy)"}
+          style={{ color: T.accent, fontFamily: T.mono, fontSize: 12, cursor: "pointer",
+            textDecoration: "underline", textDecorationStyle: "dotted" }}>
           {v.length > 50 ? v.slice(0, 50) + "…" : v}
-        </a>
+        </span>
       );
     }
     return <span style={{ color: T.text, fontFamily: T.mono, fontSize: 12 }}>{String(v)}</span>;
@@ -1899,8 +1901,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
       e.preventDefault();
       const url = extLink.dataset.external || extLink.href;
       const done = () => { setLinkToast("link copied"); setTimeout(() => setLinkToast(""), 2000); };
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(done);
-      else done();
+      const fail = () => { setLinkToast("copy unavailable"); setTimeout(() => setLinkToast(""), 2000); };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(fail);
+      else fail();
       return;
     }
     const wl = e.target.closest("[data-wl]");
@@ -2737,7 +2740,13 @@ function App() {
                 : active.type === "code"
                   ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
                   : active.type === "table"
-                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile} onRename={newName => handleRename(active, newName)} />
+                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile}
+                        onRename={newName => {
+                          // EditableFilename already called api.rename; just sync tab state.
+                          // SSE will fire refresh() automatically.
+                          setTabs(t => t.map(x => x.name === active.name && x.type === "table" ? { ...x, name: newName } : x));
+                          setActive(a => a?.name === active.name && a?.type === "table" ? { ...a, name: newName } : a);
+                        }} />
                     : active.type === "pdf"
                       ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
                       : active.type === "csv"

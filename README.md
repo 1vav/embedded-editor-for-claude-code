@@ -14,10 +14,12 @@ Claude also gets **MCP tools** to create, query, and edit all four file types in
 |---|---|
 | **⬡ Excalidraw** | Rough hand-drawn diagrams. Claude creates and edits them via MCP tools and sees PNG previews inline. Also fully editable in the browser. |
 | **◈ tldraw** | Infinite canvas with a full shape library. Browser-only — no MCP tools needed, just open and draw. |
-| **¶ Markdown** | Full CommonMark with `[[wikilinks]]`, `![[diagram embeds]]`, images, tables, code blocks, strikethrough. |
-| **🦆 DuckDB** | Real embedded analytical tables. Claude creates schemas, writes rows, and runs SQL queries via MCP tools. Embed live table previews in notes with `![[name.duckdb]]`. |
+| **¶ Markdown** | Full CommonMark with `[[wikilinks]]`, `![[diagram embeds]]`, images, tables, code blocks, strikethrough. Frontmatter panel, note style/color picker. |
+| **🦆 DuckDB** | Real embedded analytical tables. Claude creates schemas, writes rows, runs SQL queries, and creates dynamic views via MCP tools. Embed live previews with `![[name.duckdb]]`. Click column headers to sort. Click the filename to rename in place. |
+| **📄 PDF** | Drop in a `.pdf` file and open it in the browser — page-by-page viewer with zoom. |
+| **📊 CSV** | `.csv` files open as read-only tables with the same column-sort UI as DuckDB. |
 
-All four editors are **live-synced** via SSE — Claude's edits appear in the browser immediately and vice versa.
+All editors are **live-synced** via SSE — Claude's edits appear in the browser immediately and vice versa.
 
 ---
 
@@ -95,7 +97,11 @@ Claude creates `velocity.duckdb`, defines the schema, and seeds it with rows. Op
 
 Click **⌘ Query** to slide the SQL editor open. Write any SQL and hit `⌘↵` — results replace the table view instantly. Switch to **⊞ Cards** for a Kanban-style board that groups rows by any column (auto-detected from `status`, `state`, `stage`, etc.) with drag-to-regroup.
 
-Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an inline table that updates whenever the data changes.
+Click any **column header** to sort (click again to reverse). The header turns amber and shows ▲/▼. Click the **filename** in the toolbar to rename the file in place — the tab bar, sidebar, and all wikilinks update automatically.
+
+The toolbar also shows **"updated Xm ago"** — a timestamp updated after every `write_rows` call, equivalent to Jupyter's "last run" indicator.
+
+Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an inline table that updates whenever the data changes. The embed supports the same column sort.
 
 ---
 
@@ -158,7 +164,7 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 
 ## Viewer features
 
-- **File browser** — sidebar lists all `.excalidraw`, `.tldraw`, `.md`, and `.duckdb` files; filter by type
+- **File browser** — sidebar lists all `.excalidraw`, `.tldraw`, `.md`, `.duckdb`, `.pdf`, and `.csv` files; filter by type
 - **Wikilinks** — `[[filename]]` in any editor navigates to that file as a new tab
 - **Diagram embeds** — `![[diagram.excalidraw]]` in Markdown renders the diagram inline in preview
 - **Image embeds** — `![alt](image.png)` works with local files; the server serves them from the project directory
@@ -168,7 +174,11 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 - **Live sync** — SSE events push changes to all open tabs instantly
 - **Light/dark** — follows your OS preference
 - **Note style picker** — font style (Serif · Sans · Literary · Compact · Mono) and color profile (Auto · Sepia · Paper · Night · Forest) selectors in the Markdown toolbar; each setting is independent and persists across sessions
-- **Drag-to-reorder** — grab handles appear on hover for table rows, list items, headings (with their sections), and whole tables; drag to reorder
+- **Frontmatter panel** — YAML front matter in notes renders as a collapsible property panel; dates, URLs, and booleans get styled display
+- **External links** — because the preview pane only allows `localhost` navigation, clicking any external link copies its URL to the clipboard (a "link copied" toast confirms it)
+- **Drag-to-reorder** — grab handles appear on hover for paragraphs, table rows, list items, headings (with their sections), and whole tables; drag to reorder
+- **Column sort** — click any column header in DuckDB or CSV views to sort asc/desc (▲/▼); click again to reverse; numeric values sort numerically
+- **Inline rename** — click the filename in a DuckDB tab or embed header to rename it in place; all wikilinks update via the server
 
 ### Slash commands
 

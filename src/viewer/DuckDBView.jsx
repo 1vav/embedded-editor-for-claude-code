@@ -94,14 +94,14 @@ function EditableFilename({ name, type, T, onRename }) {
 
   if (editing) {
     return (
-      <input ref={inputRef} value={value}
+      <input ref={inputRef} value={value} size={Math.max(10, value.length + 2)}
         onChange={e => setValue(e.target.value)}
         onBlur={commit}
         onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setEditing(false); setValue(name); } }}
         style={{
           fontFamily: T.mono, fontSize: 12, fontWeight: 600, color: T.duck,
           background: T.surface2, border: `1px solid ${T.duck}55`, borderRadius: 4,
-          padding: "1px 6px", outline: "none", width: `${Math.max(80, value.length * 8)}px`,
+          padding: "1px 6px", outline: "none",
         }}
       />
     );
@@ -397,7 +397,7 @@ export function TableView({ name, T, onOpen, onRename }) {
         )}
 
         <span style={{ color: T.border2, margin: "0 3px" }}>|</span>
-        {ghost("↓ Export", false, () => exportCsv(result), "Download as CSV")}
+        {ghost("↓ Export", false, () => exportCsv(result, name), "Download as CSV")}
         <span style={{ flex: 1 }} />
         {isQuery && ghost(liveSync ? "⊙ Live" : "⊙ Lock", liveSync, toggleLive,
           liveSync ? "Re-runs on note changes. Click to lock." : "Locked. Click for live sync.")}
@@ -442,13 +442,26 @@ export function TableView({ name, T, onOpen, onRename }) {
   );
 }
 
-function exportCsv({ columns, rows }) {
+function exportCsv({ columns, rows }, name) {
   if (!columns?.length) return;
   const header = columns.join(",");
   const body   = rows.map(r => columns.map(c => JSON.stringify(r[c] ?? "")).join(",")).join("\n");
   const blob   = new Blob([header + "\n" + body], { type: "text/csv" });
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
-  a.download = "export.csv"; a.click();
+  a.download = `${name || "export"}.csv`; a.click();
+}
+
+// ── Shared sort comparator ────────────────────────────────────────────────────
+// Numeric-aware, locale-sensitive. Used by TableDataView and TableEmbed.
+function sortRows(rows, col, dir) {
+  return [...rows].sort((a, b) => {
+    const av = String(a[col] ?? ""), bv = String(b[col] ?? "");
+    const numA = parseFloat(av), numB = parseFloat(bv);
+    const cmp = (!isNaN(numA) && !isNaN(numB))
+      ? numA - numB
+      : av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+    return dir === "asc" ? cmp : -cmp;
+  });
 }
 
 function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
@@ -465,15 +478,14 @@ function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
     }
   }
 
-  // Sort rows by sortCol, preserving original indices for onCellBlur.
+  // Sort {row, origIndex} pairs so that onCellBlur always references the correct
+  // original row index regardless of current sort order.
   const indexedRows = rows.map((row, origIndex) => ({ row, origIndex }));
   if (sortCol) {
     indexedRows.sort(({ row: a }, { row: b }) => {
-      const av = String(a[sortCol] ?? "");
-      const bv = String(b[sortCol] ?? "");
+      const av = String(a[sortCol] ?? ""), bv = String(b[sortCol] ?? "");
       const numA = parseFloat(av), numB = parseFloat(bv);
-      const cmp = (!isNaN(numA) && !isNaN(numB))
-        ? numA - numB
+      const cmp = (!isNaN(numA) && !isNaN(numB)) ? numA - numB
         : av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
       return sortDir === "asc" ? cmp : -cmp;
     });
@@ -833,16 +845,7 @@ export function TableEmbed({ name, T, onOpen, onDelete }) {
       </div>
       {loading && <div style={{ padding: "10px 12px", color: T.muted, fontFamily: T.mono, fontSize: 11 }}>Loading…</div>}
       {!loading && view === "table" && columns.length > 0 && (() => {
-        const sortedRows = sortCol
-          ? [...rows].sort((a, b) => {
-              const av = String(a[sortCol] ?? ""), bv = String(b[sortCol] ?? "");
-              const numA = parseFloat(av), numB = parseFloat(bv);
-              const cmp = (!isNaN(numA) && !isNaN(numB))
-                ? numA - numB
-                : av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
-              return sortDir === "asc" ? cmp : -cmp;
-            })
-          : rows;
+        const sortedRows = sortCol ? sortRows(rows, sortCol, sortDir) : rows;
         return (
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: T.mono }}>
