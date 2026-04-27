@@ -1599,11 +1599,13 @@ function makeSlashSource() {
         label:  desc ? `↵ ${descPreview}` : `create new ${cmd}`,
         detail: cmd === "diagram" ? "⬡ excalidraw" : cmd === "canvas" ? "◈ tldraw" : "¶ note",
         async apply(view, _, from) {
-          // Auto-generate a short unique name — the description is the Claude prompt, not the filename
-          const id   = Date.now().toString(36);          // e.g. "m5j3k2"
-          const name = cmd === "table" ? `table-${id}`
-                     : cmd === "query" ? `query-${id}`
-                     : `${cmd}-${id}`;
+          // Auto-generate a name: slug from description (for tables/queries) or cmd-timestamp for others
+          const id = Date.now().toString(36).slice(-4);   // e.g. "3k2a"
+          const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).replace(/-+$/, "");
+          const slug = desc ? slugify(desc) : "";
+          const name = (cmd === "table" || cmd === "query")
+            ? (slug ? `${slug}-${id}` : `${cmd}-${id}`)
+            : `${cmd}-${id}`;
           const lineEnd = view.state.doc.lineAt(from).to;
           let insert, claudePrompt;
           try {

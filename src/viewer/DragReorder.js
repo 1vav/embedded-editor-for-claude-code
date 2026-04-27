@@ -243,9 +243,51 @@ function onDragKeyDown(e) {
 
 export function parseBlocks(state) {
   const groups = [];
+  groups.push(...parseTableBlockGroups(state));
   groups.push(...parseTableRowGroups(state));
   groups.push(...parseListItemGroups(state));
   groups.push(...parseSectionGroups(state));
+  return groups;
+}
+
+// ── parseTableBlockGroups ─────────────────────────────────────────────────────
+// Treats each whole Markdown table (header + delimiter + all body rows) as one
+// draggable block. Groups adjacent tables (separated by only whitespace) so they
+// can be reordered relative to each other.
+
+function parseTableBlockGroups(state) {
+  const groups = [];
+  const docLen = state.doc.length;
+  const tables = [];
+
+  syntaxTree(state).iterate({
+    enter(node) {
+      if (node.name !== "Table") return;
+      const from = state.doc.lineAt(node.from).from;
+      const lineEnd = state.doc.lineAt(node.to).to;
+      const to = lineEnd + 1 <= docLen ? lineEnd + 1 : lineEnd;
+      tables.push({ from, to });
+      return false; // don't recurse — parseTableRowGroups handles inner rows
+    },
+  });
+
+  if (tables.length < 2) return groups;
+
+  // Group consecutive tables that are only separated by whitespace.
+  let current = [tables[0]];
+  for (let i = 1; i < tables.length; i++) {
+    const prev = tables[i - 1];
+    const curr = tables[i];
+    const gap = state.doc.sliceString(prev.to, curr.from).trim();
+    if (gap === "") {
+      current.push(curr);
+    } else {
+      if (current.length >= 2) groups.push({ type: "tables", blocks: current });
+      current = [curr];
+    }
+  }
+  if (current.length >= 2) groups.push({ type: "tables", blocks: current });
+
   return groups;
 }
 

@@ -658,10 +658,30 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           const body = await readBody(req);
           if (!body?.table || !Array.isArray(body.rows)) return json(res, { error: "expected {table, rows}" }, 400);
           try {
+            const safeTable = body.table.replace(/"/g, '""');
+            // Group rows by column signature for batch inserts
+            const byKey = new Map();
             for (const row of body.rows) {
-              const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
-              const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null || v === undefined ? "NULL" : v)).join(", ");
-              await runExec(fp, `INSERT OR REPLACE INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+              const key = Object.keys(row).join("\0");
+              if (!byKey.has(key)) byKey.set(key, []);
+              byKey.get(key).push(row);
+            }
+            for (const batch of byKey.values()) {
+              const cols = Object.keys(batch[0]).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+              const allVals = batch.map(row => {
+                const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null || v === undefined ? "NULL" : v)).join(", ");
+                return `(${vals})`;
+              }).join(", ");
+              const sql = `INSERT OR REPLACE INTO "${safeTable}" (${cols}) VALUES ${allVals}`;
+              try {
+                await runExec(fp, sql, tableDir);
+              } catch (e) {
+                if (e.message?.includes('UNIQUE/PRIMARY KEY') || e.message?.includes('ON CONFLICT') || e.message?.includes('INSERT OR REPLACE')) {
+                  await runExec(fp, sql.replace("INSERT OR REPLACE INTO", "INSERT INTO"), tableDir);
+                } else {
+                  throw e;
+                }
+              }
             }
             broadcast("table:changed", { name, op: "updated" });
             return json(res, { ok: true, count: body.rows.length });

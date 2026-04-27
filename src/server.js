@@ -417,21 +417,41 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
       rows:  z.array(z.record(z.string(), z.unknown())).describe("Array of row objects to insert or replace"),
     },
     async ({ name, table, rows }) => {
+      if (!rows.length) return { content: [{ type: "text", text: `Wrote 0 row(s) to ${name}.duckdb / ${table}` }] };
       const fp = wsResolveFile(name, ".duckdb");
       const tableDir = path.dirname(fp);
-      for (const row of rows) {
+      const safeTable = table.replace(/"/g, '""');
+
+      // Helper to build a VALUES clause from a single row object
+      function rowToSql(row) {
         const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
         const vals = Object.values(row).map(v =>
           v === null || v === undefined ? "NULL"
           : typeof v === "string" ? `'${v.replace(/'/g, "''")}'`
           : v
         ).join(", ");
+        return { cols, vals: `(${vals})` };
+      }
+
+      // Batch all rows into a single INSERT — they must share the same column set.
+      // Group rows by their column signature so mixed-schema batches still work.
+      const byKey = new Map();
+      for (const row of rows) {
+        const key = Object.keys(row).join("\0");
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key).push(row);
+      }
+
+      for (const batch of byKey.values()) {
+        const { cols } = rowToSql(batch[0]);
+        const allVals = batch.map(r => rowToSql(r).vals).join(", ");
+        const sql = `INSERT OR REPLACE INTO "${safeTable}" (${cols}) VALUES ${allVals}`;
         try {
-          await runExec(fp, `INSERT OR REPLACE INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+          await runExec(fp, sql, tableDir);
         } catch (e) {
-          if (e.message?.includes('UNIQUE/PRIMARY KEY') || e.message?.includes('ON CONFLICT')) {
+          if (e.message?.includes('UNIQUE/PRIMARY KEY') || e.message?.includes('ON CONFLICT') || e.message?.includes('INSERT OR REPLACE')) {
             // Table has no PK — fall back to plain INSERT
-            await runExec(fp, `INSERT INTO "${table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+            await runExec(fp, sql.replace("INSERT OR REPLACE INTO", "INSERT INTO"), tableDir);
           } else {
             throw e;
           }
@@ -486,6 +506,28 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
       const sep    = `| ${columns.map(() => "---").join(" | ")} |`;
       const body   = rows.map(r => `| ${columns.map(c => String(r[c] ?? "")).join(" | ")} |`).join("\n");
       return { content: [{ type: "text", text: `${rowCount} rows\n\n${header}\n${sep}\n${body}` }] };
+    }
+  );
+
+  // ── list_workspace ───────────────────────────────────────────────────────────
+  server.tool(
+    "list_workspace",
+    "List all files in the workspace grouped by type (diagrams, notes, tldraw canvases, DuckDB tables). One call instead of four separate list calls.",
+    {},
+    async () => {
+      const [diagrams, notes, tldraw, tables] = await Promise.all([
+        glob("**/*.excalidraw", { cwd: ROOT, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
+        glob("**/*.md",         { cwd: ROOT, ignore: ["node_modules/**", "CLAUDE.md", ".claude/**"] }),
+        glob("**/*.tldraw",     { cwd: ROOT, ignore: ["node_modules/**"] }),
+        glob("**/*.duckdb",     { cwd: ROOT, ignore: ["node_modules/**"] }),
+      ]);
+      const result = {
+        diagrams: diagrams.map(f => f.replace(/\.excalidraw$/, "")).sort(),
+        notes:    notes   .map(f => f.replace(/\.md$/, "")).sort(),
+        tldraw:   tldraw  .map(f => f.replace(/\.tldraw$/, "")).sort(),
+        tables:   tables  .map(f => f.replace(/\.duckdb$/, "")).sort(),
+      };
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
   );
 }

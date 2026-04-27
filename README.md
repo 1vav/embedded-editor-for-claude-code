@@ -129,7 +129,7 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 | `list_tables` | List all `.duckdb` files |
 | `create_table` | Create a new DuckDB file with an optional schema |
 | `read_table` | Read rows from the first user table (returns markdown) |
-| `write_rows` | Upsert rows into a table |
+| `write_rows` | Upsert rows into a table (batched — all rows in one SQL statement) |
 | `delete_rows` | Delete rows matching a WHERE clause |
 | `query_table` | Run arbitrary SQL; optional `save_as` inserts results into another table |
 
@@ -137,6 +137,7 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 
 | Tool | What it does |
 |---|---|
+| `list_workspace` | List all files grouped by type in one call (diagrams, notes, tldraw, tables) |
 | `rename_file` | Rename a file and rewrite all `[[wikilinks]]` |
 | `get_backlinks` | Find all files that link to a given file |
 | `list_history` | List saved snapshots for a diagram |
@@ -166,6 +167,7 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 - **Live sync** — SSE events push changes to all open tabs instantly
 - **Light/dark** — follows your OS preference
 - **Note style picker** — font style (Serif · Sans · Literary · Compact · Mono) and color profile (Auto · Sepia · Paper · Night · Forest) selectors in the Markdown toolbar; each setting is independent and persists across sessions
+- **Drag-to-reorder** — grab handles appear on hover for table rows, list items, headings (with their sections), and whole tables; drag to reorder
 
 ### Slash commands
 
@@ -178,8 +180,8 @@ In the Markdown note editor, type `/` at the start of a line to open the command
 | `/diagram [description]` | Creates a new Excalidraw diagram, embeds it as `![[name.excalidraw]]`, and pre-fills the prompt bar with your description so Claude populates it |
 | `/canvas [description]` | Creates a new tldraw canvas and embeds it as `![[name.tldraw]]` |
 | `/note [description]` | Creates a new linked Markdown note, embeds it as `[[name]]`, and pre-fills the prompt bar for Claude to write its content |
-| `/table [description]` | Creates a new DuckDB table file, embeds it as `![[name.duckdb]]`, and pre-fills the prompt bar so Claude defines the schema |
-| `/query [description]` | Creates a new DuckDB file as a query result target, embeds it, and pre-fills Claude to write the query SQL |
+| `/table [description]` | Creates a new DuckDB table file with a slug-based name derived from the description (e.g. `/table sprint velocity` → `sprint-velocity-a3f.duckdb`), embeds it, and pre-fills the prompt bar so Claude defines the schema |
+| `/query [description]` | Creates a new DuckDB file as a query result target with a slug-based name, embeds it, and pre-fills Claude to write the query SQL |
 | `/link` | Opens a searchable picker of all existing files and inserts a wikilink |
 
 **How it works:**

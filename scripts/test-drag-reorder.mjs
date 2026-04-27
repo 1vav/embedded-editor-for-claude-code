@@ -162,3 +162,56 @@ test("list item with continuation line: block spans both lines", () => {
   assert.equal(texts[0], "- First item\n  continuation\n");
   assert.equal(texts[1], "- Second item\n");
 });
+
+// ── parseTableBlockGroups ─────────────────────────────────────────────────────
+
+test("parseTableBlockGroups: two tables separated only by blank line → one group with two blocks", () => {
+  // In Markdown, a blank line is required to separate two tables.
+  // A blank-line-only gap counts as "adjacent" for drag-reorder purposes.
+  const doc = `| A | B |\n|---|---|\n| 1 | 2 |\n\n| C | D |\n|---|---|\n| 3 | 4 |\n`;
+  const state = makeState(doc);
+  const groups = parseBlocks(state);
+  const tableBlockGroups = groups.filter(g => g.type === "tables");
+  assert.equal(tableBlockGroups.length, 1, "should have one tables group");
+  assert.equal(tableBlockGroups[0].blocks.length, 2, "group should have two blocks");
+});
+
+test("parseTableBlockGroups: single table → no group (needs >=2)", () => {
+  const doc = `| A | B |\n|---|---|\n| 1 | 2 |\n`;
+  const state = makeState(doc);
+  const groups = parseBlocks(state).filter(g => g.type === "tables");
+  assert.equal(groups.length, 0);
+});
+
+test("parseTableBlockGroups: two tables separated by paragraph → no group", () => {
+  const doc = `| A | B |\n|---|---|\n| 1 | 2 |\n\nSome text\n\n| C | D |\n|---|---|\n| 3 | 4 |\n`;
+  const state = makeState(doc);
+  const groups = parseBlocks(state).filter(g => g.type === "tables");
+  assert.equal(groups.length, 0, "tables with content between them should not be grouped");
+});
+
+test("parseTableBlockGroups: each table block spans full table (header+delimiter+rows)", () => {
+  const tableA = `| A | B |\n|---|---|\n| 1 | 2 |\n`;
+  const tableB = `| C | D |\n|---|---|\n| 3 | 4 |\n`;
+  const doc = tableA + "\n" + tableB;
+  const state = makeState(doc);
+  const groups = parseBlocks(state).filter(g => g.type === "tables");
+  assert.equal(groups.length, 1);
+  const texts = groups[0].blocks.map(b => doc.slice(b.from, b.to));
+  assert.equal(texts[0], tableA, "first block should be entire first table");
+  assert.equal(texts[1], tableB, "second block should be entire second table");
+});
+
+test("parseTableBlockGroups: reorder two tables swaps them", () => {
+  const tableA = `| A | B |\n|---|---|\n| 1 | 2 |\n`;
+  const tableB = `| C | D |\n|---|---|\n| 3 | 4 |\n`;
+  const doc = tableA + "\n" + tableB;
+  const state = makeState(doc);
+  const group = parseBlocks(state).filter(g => g.type === "tables")[0];
+  const tx = buildReorderTransaction(state, group, 0, 2); // move table A after table B
+  const newDoc = tx.changes.apply(state.doc).toString();
+  // After swap: tableB then blank line then tableA
+  assert.ok(newDoc.includes(tableB), "second table should come first after swap");
+  assert.ok(newDoc.includes(tableA), "first table should come second after swap");
+  assert.ok(newDoc.indexOf(tableB) < newDoc.indexOf(tableA), "tableB should precede tableA");
+});
