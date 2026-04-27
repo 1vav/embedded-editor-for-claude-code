@@ -52,7 +52,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url here — specifying it causes setup-node to inject
+          # NODE_AUTH_TOKEN (GitHub token) into the env, which overrides npm's
+          # OIDC trusted-publisher exchange and causes a 404 on publish.
 
       - name: Install dependencies
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
