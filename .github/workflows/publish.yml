@@ -5,8 +5,8 @@ on:
     tags: ['v*']
 
 permissions:
-  id-token: write
-  contents: write  # needed to create GitHub Release
+  id-token: write   # OIDC trusted publisher — no NPM_TOKEN needed
+  contents: write   # needed to create GitHub Release
 
 jobs:
   publish:
@@ -26,15 +26,12 @@ jobs:
         run: npm run build
 
       - name: Publish to npm
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
 
       - name: Extract changelog for this version
         id: changelog
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          # Pull the section between "## v$VERSION" and the next "## v" heading
           NOTES=$(awk "/^## v?${VERSION}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md 2>/dev/null || echo "")
           if [ -z "$NOTES" ]; then NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."; fi
           {
