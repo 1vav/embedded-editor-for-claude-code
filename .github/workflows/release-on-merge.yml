@@ -2,7 +2,7 @@ name: Release on merge to main
 
 # Runs whenever a PR is merged into main. Reads the version from package.json,
 # skips pre-release suffixes and already-tagged versions, then:
-#   1. Publishes to npm (OIDC — no NPM_TOKEN needed)
+#   1. Publishes to npm (provenance via trusted publisher)
 #   2. Creates and pushes a "v{version}" git tag
 #   3. Creates a GitHub Release with changelog notes
 #
@@ -14,7 +14,7 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write   # OIDC trusted publisher for npm
+  id-token: write   # needed for --provenance
   contents: write   # push tag + create GitHub Release
 
 jobs:
@@ -52,9 +52,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          # No registry-url here — specifying it causes setup-node to inject
-          # NODE_AUTH_TOKEN (GitHub token) into the env, which overrides npm's
-          # OIDC trusted-publisher exchange and causes a 404 on publish.
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
@@ -67,10 +65,6 @@ jobs:
       - name: Publish to npm
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm publish --access public --provenance
-        env:
-          # setup-node injects NODE_AUTH_TOKEN=github.token which blocks npm's
-          # OIDC trusted-publisher exchange. Clear it so npm uses OIDC instead.
-          NODE_AUTH_TOKEN: ''
 
       - name: Create and push git tag
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
