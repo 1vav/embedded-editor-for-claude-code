@@ -91,6 +91,26 @@ export async function runExec(filePath, sql, cwd = null) {
   });
 }
 
+// Run a read_csv() query against a CSV file using an ephemeral in-memory DuckDB.
+// Returns { columns: string[], rows: object[], rowCount: number }.
+export function queryCsv(csvPath) {
+  const safePath = csvPath.replace(/'/g, "''");
+  return new Promise((resolve, reject) => {
+    const db = new duckdb.Database(":memory:", err => {
+      if (err) return reject(err);
+      db.all(
+        `SELECT * FROM read_csv('${safePath}', auto_detect=true) LIMIT 500`,
+        (err2, rows) => {
+          db.close(() => {});
+          if (err2) return reject(err2);
+          const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
+          resolve({ columns, rows, rowCount: rows.length });
+        }
+      );
+    });
+  });
+}
+
 // Replace relative ./path references in SQL with absolute paths that stay
 // within EXCALIDRAW_ROOT. Throws if a resolved path escapes ROOT.
 function injectCwd(sql, filePath, cwd) {

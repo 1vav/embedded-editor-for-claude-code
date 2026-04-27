@@ -81,8 +81,9 @@ try {
   const tools = await rpc("tools/list", {});
   const names = tools.tools.map((t) => t.name).sort();
   const expected = [
-    "append_elements","create_diagram","create_note","create_table","delete_diagram","delete_note",
-    "delete_rows","get_backlinks","list_diagrams","list_history","list_notes","list_tables","list_tldraw",
+    "append_elements","create_diagram","create_note","create_table","create_view",
+    "delete_diagram","delete_note","delete_rows","get_backlinks",
+    "list_diagrams","list_history","list_notes","list_tables","list_tldraw","list_workspace",
     "query_table","read_diagram","read_note","read_table","read_tldraw","rename_file","restore_snapshot",
     "write_diagram","write_note","write_rows",
   ].sort();

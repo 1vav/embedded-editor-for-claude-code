@@ -18,7 +18,14 @@ if (command === "init") {
 // ── view / open ───────────────────────────────────────────────────────────────
 // Explicit viewer commands — always start the browser server.
 if (command === "view") {
-  const port = parseInt(args[1]) || derivePort(ROOT);
+  // --root <path> pins the workspace root explicitly, overriding EXCALIDRAW_ROOT
+  // and CWD. launch.json always passes this so the server serves the right folder
+  // regardless of which directory Claude Code happens to launch from.
+  const rootIdx = args.indexOf("--root");
+  if (rootIdx >= 0 && args[rootIdx + 1]) {
+    process.env.EXCALIDRAW_ROOT = args[rootIdx + 1];
+  }
+  const port = parseInt(args[1]) || derivePort(process.env.EXCALIDRAW_ROOT || process.cwd());
   await startViewerServer(port);
   process.stderr.write(`[embedded-editor] viewer running at http://127.0.0.1:${port}\n`);
   await new Promise(() => {});
