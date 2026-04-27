@@ -1,46 +1,72 @@
 name: Release on merge to main
 
-# Runs whenever a PR is merged into main. Reads the version from package.json and
-# creates a "v{version}" tag if it doesn't already exist. Pushing the tag then
-# triggers the publish.yml workflow which publishes to npm and creates a GitHub Release.
+# Runs whenever a PR is merged into main. Reads the version from package.json,
+# skips pre-release suffixes and already-tagged versions, then:
+#   1. Publishes to npm (OIDC — no NPM_TOKEN needed)
+#   2. Creates and pushes a "v{version}" git tag
+#   3. Creates a GitHub Release with changelog notes
+#
+# All three steps happen in one job so we don't need a cross-workflow trigger
+# (GITHUB_TOKEN cannot trigger other workflows).
 
 on:
   push:
     branches: [main]
 
 permissions:
-  contents: write  # needed to push the tag
+  id-token: write   # OIDC trusted publisher for npm
+  contents: write   # push tag + create GitHub Release
 
 jobs:
-  tag-and-release:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # need full history to check existing tags
+          fetch-depth: 0  # full history needed to check existing tags
 
       - name: Read version from package.json
         id: pkg
         run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
+      - name: Skip pre-release versions
+        if: contains(steps.pkg.outputs.version, '-')
+        run: |
+          echo "Version ${{ steps.pkg.outputs.version }} contains a pre-release suffix — skipping release."
+          exit 0
+
       - name: Check if tag already exists
         id: tag_check
         run: |
           TAG="v${{ steps.pkg.outputs.version }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $TAG already exists — skipping release."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Skip pre-release versions on main
-        if: contains(steps.pkg.outputs.version, '-')
-        run: |
-          echo "Version ${{ steps.pkg.outputs.version }} contains a pre-release suffix — skipping tag."
-          exit 0
+      - name: Set up Node.js
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
 
-      - name: Create and push tag
+      - name: Install dependencies
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        run: npm ci
+
+      - name: Build vendor assets
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        run: npm run build
+
+      - name: Publish to npm
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        run: npm publish --access public --provenance
+
+      - name: Create and push git tag
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: |
           git config user.name  "github-actions[bot]"
@@ -49,6 +75,32 @@ jobs:
           git push origin "${{ steps.tag_check.outputs.tag }}"
           echo "Created and pushed tag ${{ steps.tag_check.outputs.tag }}"
 
-      - name: Already tagged — nothing to do
-        if: steps.tag_check.outputs.exists == 'true'
-        run: echo "Tag ${{ steps.tag_check.outputs.tag }} already exists — skipping."
+      - name: Extract changelog for this version
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        id: changelog
+        run: |
+          VERSION="${{ steps.pkg.outputs.version }}"
+          NOTES=$(awk "/^## v?${VERSION}/{found=1; next} found && /^## /{exit} found{print}" CHANGELOG.md 2>/dev/null || echo "")
+          if [ -z "$NOTES" ]; then NOTES="See [CHANGELOG.md](CHANGELOG.md) for details."; fi
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const tag  = "${{ steps.tag_check.outputs.tag }}";
+            const body = `${{ steps.changelog.outputs.notes }}`;
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              tag_name: tag,
+              name: tag,
+              body,
+              draft: false,
+              prerelease: tag.includes('-'),
+            });
