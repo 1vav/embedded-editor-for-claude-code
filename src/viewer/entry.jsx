@@ -8,6 +8,8 @@ import { Tldraw, getSnapshot, loadSnapshot, toRichText, createShapeId } from "@t
 import "tldraw/tldraw.css";
 import MarkdownIt from "markdown-it";
 import { TableView, TableEmbed } from "./DuckDBView.jsx";
+import { PdfView } from "./PdfView.jsx";
+import { CsvView } from "./CsvView.jsx";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
@@ -18,10 +20,11 @@ import { syntaxHighlighting, defaultHighlightStyle, syntaxTree, indentOnInput, b
 import { closeBrackets, closeBracketsKeymap, autocompletion, startCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { searchKeymap } from "@codemirror/search";
 // Bundled languages (always in main chunk)
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { javascript } from "@codemirror/lang-javascript";
 import { python }     from "@codemirror/lang-python";
 import { json as jsonLang } from "@codemirror/lang-json";
+import { makeDragReorderPlugin } from "./DragReorder.js";
 
 // Language loader registry — bundled langs resolve synchronously, lazy ones split into chunks
 const LANG_LOADERS = {
@@ -100,8 +103,8 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
   return EditorView.theme({
     "&":            { height: "100%", background: N.surface, color: N.text },
     ".cm-scroller": { fontFamily: S.noteFont, fontSize: S.fontSize, lineHeight: S.lineHeight, overflow: "auto" },
-    ".cm-content":  { caretColor: N.accent, padding: "28px 32px 60px", maxWidth: S.maxWidth, margin: "0 auto", boxSizing: "content-box", fontFamily: S.noteFont },
-    ".cm-line":     { padding: "0" },
+    ".cm-content":  { caretColor: N.accent, padding: "28px 32px 60px 52px", maxWidth: S.maxWidth, margin: "0 auto", boxSizing: "content-box", fontFamily: S.noteFont },
+    ".cm-line":     { padding: "0", position: "relative" },
     ".cm-activeLine":   { background: N.surface2 + "40" },
     ".cm-selectionBackground, ::selection": { background: N.accent + "30 !important" },
     ".cm-cursor":   { borderLeftColor: N.accent },
@@ -131,6 +134,12 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: N.surface3 },
     ".cm-completionLabel":                            { flex: "1", color: N.text, fontSize: "12px" },
     ".cm-completionDetail":                           { color: N.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
+    // Drag-to-reorder handles
+    ".ee-drag-handle":         { display: "inline-block", width: "0", height: "0", overflow: "visible" },
+    ".ee-drag-handle-btn":     { position: "absolute", left: "-40px", top: "50%", transform: "translateY(-50%)", width: "24px", height: "1.4em", display: "flex", alignItems: "center", justifyContent: "center", cursor: "grab", color: "transparent", userSelect: "none", fontSize: "14px", borderRadius: "4px", transition: "color 0.1s, background 0.08s" },
+    ".cm-line:hover .ee-drag-handle-btn, .cm-line.ee-handle-hover .ee-drag-handle-btn": { color: N.muted },
+    ".ee-drag-handle-btn.ee-active": { color: N.accent, cursor: "grabbing" },
+    ".ee-drag-line":            { position: "absolute", left: "20px", right: "20px", height: "2px", background: N.accent, pointerEvents: "none", display: "none", zIndex: "10", borderRadius: "1px" },
   }, { dark: N.isDark });
 }
 
@@ -270,6 +279,22 @@ const _fence = md.renderer.rules.fence.bind(md.renderer);
 md.renderer.rules.fence = (tokens, idx, options, env, self) =>
   `<div class="code-block">${_fence(tokens, idx, options, env, self)}<button class="copy-btn">copy</button></div>`;
 
+// External links: open in new tab, show URL in title, add visual indicator.
+const _linkOpen = md.renderer.rules.link_open
+  || ((tokens, idx, opts, env, self) => self.renderToken(tokens, idx, opts));
+md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
+  const href = tokens[idx].attrGet("href") || "";
+  if (/^https?:\/\//.test(href)) {
+    // Claude Code Preview blocks non-localhost navigation. Store the real URL
+    // in data-external and use href="#" so the browser never tries to navigate.
+    // The click handler will copy the URL to clipboard instead.
+    tokens[idx].attrSet("href",          "#");
+    tokens[idx].attrSet("data-external", href);
+    tokens[idx].attrSet("title",         href + " (click to copy)");
+  }
+  return _linkOpen(tokens, idx, opts, env, self);
+};
+
 // Split raw markdown on ![[name.excalidraw]] and ![[name.tldraw]] embed markers.
 // Returns [{type:"text",text}, {type:"diagram",name}, {type:"tldraw",name}, ...]
 // Skips matches that fall inside fenced code blocks (``` ... ```) or inline code spans (` ... `).
@@ -337,10 +362,121 @@ function renderMd(text) {
     /\[\[([^\]]+)\]\]/g,
     (n) => `<a data-wl="${esc(n.trim())}" href="#">${n.trim()}</a>`
   );
-  return DOMPurify.sanitize(md.render(pre2), { ADD_ATTR: ["data-wl"] });
+  return DOMPurify.sanitize(md.render(pre2), { ADD_ATTR: ["data-wl", "data-external", "target", "rel"] });
 }
 
 function esc(s) { return String(s).replace(/"/g, "&quot;"); }
+
+// Returns { fm: Object|null, body: string } where body has the frontmatter block removed.
+function parseFrontmatter(text) {
+  const m = text.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return { fm: null, body: text };
+  const fm = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const kv = line.match(/^([\w][\w-]*):\s*(.*)/);
+    if (!kv) continue;
+    let v = kv[2].trim().replace(/^["']|["']$/g, "");
+    if (v === "true")  { fm[kv[1]] = true;  continue; }
+    if (v === "false") { fm[kv[1]] = false; continue; }
+    const n = Number(v);
+    if (v !== "" && !isNaN(n)) { fm[kv[1]] = n; continue; }
+    if (v.startsWith("[") && v.endsWith("]")) {
+      fm[kv[1]] = v.slice(1, -1).split(",").map(s => s.trim().replace(/^["']|["']$/g, ""));
+      continue;
+    }
+    fm[kv[1]] = v;
+  }
+  return { fm: Object.keys(fm).length ? fm : null, body: text.slice(m[0].length) };
+}
+
+function FrontmatterPanel({ fm, T }) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  if (!fm) return null;
+
+  function renderValue(v) {
+    if (typeof v === "boolean") {
+      return (
+        <span style={{
+          fontSize: 10, padding: "1px 7px", borderRadius: 10,
+          background: v ? "#22c55e22" : T.surface2,
+          color: v ? "#4ade80" : T.muted,
+          border: `1px solid ${v ? "#4ade8044" : T.border2}`,
+          fontFamily: T.mono,
+        }}>{String(v)}</span>
+      );
+    }
+    if (typeof v === "number") {
+      return <span style={{ fontFamily: T.mono, color: T.text }}>{v}</span>;
+    }
+    if (Array.isArray(v)) {
+      return (
+        <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {v.map((item, i) => (
+            <span key={i} style={{
+              fontSize: 10, padding: "1px 7px", borderRadius: 10,
+              background: T.surface2, color: T.textDim,
+              border: `1px solid ${T.border2}`, fontFamily: T.mono,
+            }}>{item}</span>
+          ))}
+        </span>
+      );
+    }
+    if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const d = new Date(v);
+      if (!isNaN(d)) {
+        return <span style={{ color: T.text, fontFamily: T.mono }}>{d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>;
+      }
+    }
+    if (typeof v === "string" && /^https?:\/\//.test(v)) {
+      return (
+        <span onClick={() => { if (navigator.clipboard) navigator.clipboard.writeText(v).catch(() => {}); }}
+          title={v + " (click to copy)"}
+          style={{ color: T.accent, fontFamily: T.mono, fontSize: 12, cursor: "pointer",
+            textDecoration: "underline", textDecorationStyle: "dotted" }}>
+          {v.length > 50 ? v.slice(0, 50) + "…" : v}
+        </span>
+      );
+    }
+    return <span style={{ color: T.text, fontFamily: T.mono, fontSize: 12 }}>{String(v)}</span>;
+  }
+
+  return (
+    <div style={{
+      margin: "0 0 16px 0", border: `1px solid ${T.border}`,
+      borderRadius: 6, overflow: "hidden", background: T.surface,
+    }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "6px 12px", cursor: "pointer",
+          background: T.surface2, borderBottom: collapsed ? "none" : `1px solid ${T.border}`,
+        }}
+      >
+        <span style={{ fontFamily: T.mono, fontSize: 10, fontWeight: 700, letterSpacing: ".08em", color: T.muted, textTransform: "uppercase" }}>
+          Properties
+        </span>
+        <span style={{ color: T.muted, fontSize: 10 }}>{collapsed ? "▸" : "▾"}</span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: "6px 0" }}>
+          {Object.entries(fm).map(([k, v]) => (
+            <div key={k} style={{
+              display: "flex", alignItems: "flex-start", gap: 12,
+              padding: "4px 12px",
+            }}>
+              <span style={{
+                fontFamily: T.mono, fontSize: 11, color: T.muted,
+                minWidth: 120, flexShrink: 0, paddingTop: 2,
+              }}>{k}</span>
+              <span style={{ flex: 1 }}>{renderValue(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Theme ────────────────────────────────────────────────────────────────────
 
@@ -661,7 +797,7 @@ function ColorPicker({ colorId, onChange }) {
 
 // ─── File Dropdown ────────────────────────────────────────────────────────────
 
-function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, recent, active, onOpen, onDelete, onClose }) {
+function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, active, onOpen, onDelete, onClose }) {
   const T = useT();
   const [q,            setQ]            = useState("");
   const [filter,       setFilter]       = useState("all"); // all | drawings | notes | code | data
@@ -681,6 +817,8 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, rec
     ...notes.map(n => ({ name: n, type: "note" })),
     ...(codeFiles || []).map(n => ({ name: n, type: "code" })),
     ...(tableFiles || []).map(n => ({ name: n, type: "table" })),
+    ...(pdfFiles || []).map(n => ({ name: n, type: "pdf" })),
+    ...(csvFiles || []).map(n => ({ name: n, type: "csv" })),
   ].sort((a, b) => a.name.localeCompare(b.name));
 
   const shown = allFiles.filter(f => {
@@ -688,6 +826,8 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, rec
     if (filter === "notes"    && f.type !== "note")    return false;
     if (filter === "code"     && f.type !== "code")    return false;
     if (filter === "data"     && f.type !== "table")   return false;
+    if (filter === "pdf"      && f.type !== "pdf")     return false;
+    if (filter === "csv"      && f.type !== "csv")     return false;
     return !q || f.name.toLowerCase().includes(q.toLowerCase());
   });
 
@@ -696,6 +836,8 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, rec
     if (filter === "notes"    && r.type !== "note")    return false;
     if (filter === "code"     && r.type !== "code")    return false;
     if (filter === "data"     && r.type !== "table")   return false;
+    if (filter === "pdf"      && r.type !== "pdf")     return false;
+    if (filter === "csv"      && r.type !== "csv")     return false;
     return !q || r.name.toLowerCase().includes(q.toLowerCase());
   }).slice(0, 6);
 
@@ -718,7 +860,7 @@ function FileDropdown({ diagrams, tldrawFiles, notes, codeFiles, tableFiles, rec
             padding: "5px 8px", outline: "none",
           }} />
         <div style={{ display: "flex", gap: 3, marginTop: 6 }}>
-          {["all","drawings","notes","code","data"].map(f => (
+          {["all","drawings","notes","code","data","pdf","csv"].map(f => (
             <button key={f} onClick={() => setFilter(f)} style={{
               background: filter === f ? T.surface3 : "transparent",
               border: `1px solid ${filter === f ? T.border2 : "transparent"}`,
@@ -795,8 +937,8 @@ function DropSection({ label, children }) {
 function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, title }) {
   const T = useT();
   const [h, sH] = useState(false);
-  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : type === "table" ? null : "¶";
-  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : T.blue;
+  const icon = type === "diagram" ? "⬡" : type === "tldraw" ? "◈" : type === "code" ? "</>" : (type === "table" || type === "pdf" || type === "csv") ? null : "¶";
+  const iconColor = type === "diagram" ? T.accent : type === "tldraw" ? T.tldraw : type === "code" ? T.orange : type === "table" ? T.duck : type === "pdf" ? T.muted : type === "csv" ? T.muted : T.blue;
   return (
     <div onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
       title={title} style={{
@@ -808,7 +950,11 @@ function DropItem({ name, type, active, sub, onClick, onDelete, indent = 0, titl
       }}>
       {type === "table"
         ? <DuckBrandIcon size={10} />
-        : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
+        : type === "pdf"
+          ? <span style={{ fontSize: 9, color: T.muted, flexShrink: 0, fontFamily: T.mono }}>PDF</span>
+          : type === "csv"
+            ? <span style={{ fontSize: 9, color: T.muted, flexShrink: 0, fontFamily: T.mono }}>CSV</span>
+            : <span style={{ fontSize: 10, color: iconColor, flexShrink: 0 }}>{icon}</span>
       }
       <span style={{ flex: 1, minWidth: 0, fontFamily: T.mono, fontSize: 11,
         color: active ? T.text : T.textDim, whiteSpace: "nowrap" }}>{midTruncate(name)}</span>
@@ -960,7 +1106,7 @@ function BrandMark({ onHome }) {
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, connected,
-  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, recent, onOpen, onDelete }) {
+  onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, onOpen, onDelete }) {
   const T = useT();
   const [dropOpen,  setDropOpen]  = useState(false);
   const [canLeft,   setCanLeft]   = useState(false);
@@ -1030,7 +1176,7 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
         </Ghost>
         {dropOpen && (
           <FileDropdown
-            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles}
+            diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles} csvFiles={csvFiles}
             recent={recent} active={active}
             onOpen={(name, type) => { onOpen(name, type); }}
             onDelete={onDelete}
@@ -1289,39 +1435,77 @@ function TldrawEditor({ name, onUserSave }) {
 
 // ─── Note View ────────────────────────────────────────────────────────────────
 
-function DiagramEmbed({ name, onOpen }) {
+function EmbedDeleteBtn({ name, type, onDelete }) {
+  const T = useT();
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) {
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}
+        onClick={e => e.stopPropagation()}>
+        <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted }}>Delete?</span>
+        <span onClick={() => { onDelete(name, type); }}
+          style={{ fontFamily: T.mono, fontSize: 10, color: "#f87171", cursor: "pointer",
+            border: "1px solid #f8717155", borderRadius: 3, padding: "1px 6px" }}>yes</span>
+        <span onClick={() => setConfirm(false)}
+          style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, cursor: "pointer",
+            border: `1px solid ${T.border2}`, borderRadius: 3, padding: "1px 6px" }}>cancel</span>
+      </span>
+    );
+  }
+  return (
+    <span onClick={e => { e.stopPropagation(); setConfirm(true); }}
+      title={`Delete ${name}`}
+      style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, color: T.muted,
+        cursor: "pointer", border: `1px solid ${T.border2}`, borderRadius: 3, padding: "1px 6px",
+        opacity: 0.7, transition: "opacity .1s" }}
+      onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#f87171"; }}
+      onMouseLeave={e => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.color = T.muted; }}>
+      ⊗
+    </span>
+  );
+}
+
+function DiagramEmbed({ name, onOpen, onDelete }) {
   const T = useT();
   const [h, sH] = useState(false);
   return (
-    <div onClick={() => onOpen(name, "diagram")}
-      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
-      style={{ margin: "16px 0", cursor: "pointer", borderRadius: 8, overflow: "hidden",
+    <div onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{ margin: "16px 0", borderRadius: 8, overflow: "hidden",
         border: `1px solid ${h ? T.accent : T.border2}`, transition: "border-color .15s" }}>
-      <img src={api.pngUrl(name)} alt={name} style={{ width: "100%", display: "block" }} />
+      <div onClick={() => onOpen(name, "diagram")} style={{ cursor: "pointer" }}>
+        <img src={api.pngUrl(name)} alt={name} style={{ width: "100%", display: "block" }} />
+      </div>
       <div style={{ padding: "6px 10px", background: T.surface2, fontFamily: T.mono,
         fontSize: 10, color: T.muted, display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: T.accent }}>⬡</span> {name}
-        <span style={{ marginLeft: "auto", color: T.blue }}>open →</span>
+        {onDelete
+          ? <EmbedDeleteBtn name={name} type="diagram" onDelete={onDelete} />
+          : <span onClick={() => onOpen(name, "diagram")}
+              style={{ marginLeft: "auto", color: T.blue, cursor: "pointer" }}>open →</span>}
       </div>
     </div>
   );
 }
 
-function TldrawEmbed({ name, onOpen }) {
+function TldrawEmbed({ name, onOpen, onDelete }) {
   const T = useT();
   const [h, sH] = useState(false);
   return (
-    <div onClick={() => onOpen(name, "tldraw")}
-      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
-      style={{ margin: "16px 0", cursor: "pointer", borderRadius: 8, overflow: "hidden",
+    <div onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{ margin: "16px 0", borderRadius: 8, overflow: "hidden",
         border: `1px solid ${h ? T.tldraw : T.border2}`, transition: "border-color .15s" }}>
-      <div style={{ height: 80, background: T.surface2, display: "flex", alignItems: "center",
-        justifyContent: "center", color: T.tldraw, fontSize: 28 }}>◈</div>
+      <div onClick={() => onOpen(name, "tldraw")} style={{ cursor: "pointer" }}>
+        <div style={{ height: 80, background: T.surface2, display: "flex", alignItems: "center",
+          justifyContent: "center", color: T.tldraw, fontSize: 28 }}>◈</div>
+      </div>
       <div style={{ padding: "6px 10px", background: T.surface2, fontFamily: T.mono,
         fontSize: 10, color: T.muted, display: "flex", alignItems: "center", gap: 6,
         borderTop: `1px solid ${T.border}` }}>
         <span style={{ color: T.tldraw }}>◈</span> {name}
-        <span style={{ marginLeft: "auto", color: T.blue }}>open →</span>
+        {onDelete
+          ? <EmbedDeleteBtn name={name} type="tldraw" onDelete={onDelete} />
+          : <span onClick={() => onOpen(name, "tldraw")}
+              style={{ marginLeft: "auto", color: T.blue, cursor: "pointer" }}>open →</span>}
       </div>
     </div>
   );
@@ -1344,6 +1528,27 @@ function makeSlashSource() {
     link:    "link to existing file",
   };
 
+  // Text-insert commands — insert Markdown syntax without creating files.
+  const TEXT_CMDS = [
+    { label: "heading1",  aliases: ["h1"],                    detail: "# Heading 1",    info: "Insert an H1 heading",        template: "# ",        cursorOffset: 2  },
+    { label: "heading2",  aliases: ["h2"],                    detail: "## Heading 2",   info: "Insert an H2 heading",        template: "## ",       cursorOffset: 3  },
+    { label: "heading3",  aliases: ["h3"],                    detail: "### Heading 3",  info: "Insert an H3 heading",        template: "### ",      cursorOffset: 4  },
+    { label: "bullet",    aliases: ["ul", "list"],            detail: "- item",         info: "Insert a bullet list item",   template: "- ",        cursorOffset: 2  },
+    { label: "todo",      aliases: ["task", "checkbox"],      detail: "- [ ] task",     info: "Insert a task checkbox",      template: "- [ ] ",    cursorOffset: 6  },
+    { label: "callout",   aliases: ["quote", "blockquote"],   detail: "> blockquote",   info: "Insert a blockquote",         template: "> ",        cursorOffset: 2  },
+    { label: "divider",   aliases: ["hr", "rule", "separator"], detail: "---",          info: "Insert a horizontal divider", template: "\n---\n",   cursorOffset: 5  },
+    { label: "codeblock", aliases: ["code", "fence"],         detail: "```code```",     info: "Insert a fenced code block",  template: "```\n\n```", cursorOffset: 4 },
+    { label: "bold",      aliases: ["b", "strong"],           detail: "**bold**",       info: "Insert bold text",            template: "****",      cursorOffset: 2  },
+    { label: "italic",    aliases: ["i", "em"],               detail: "*italic*",       info: "Insert italic text",          template: "**",        cursorOffset: 1  },
+  ];
+
+  function applyTextCmd(view, completion, from, to) {
+    view.dispatch({
+      changes: { from, to, insert: completion.template },
+      selection: { anchor: from + completion.cursorOffset },
+    });
+  }
+
   return async function slashSource(context) {
     const line = context.state.doc.lineAt(context.pos);
     const lineText = context.state.doc.sliceString(line.from, context.pos);
@@ -1357,15 +1562,36 @@ function makeSlashSource() {
 
     // Still typing the command word — show matching commands as prefix completions
     if (!hasSpace) {
-      const matching = ALL_CMDS.filter(c => c.startsWith(cmdTyped));
-      if (matching.length === 0) return null;
+      const matchingFile = ALL_CMDS.filter(c => c.startsWith(cmdTyped));
+      // For text commands, match against label and all aliases.
+      const seenTextLabels = new Set();
+      const matchingText = TEXT_CMDS.filter(c => {
+        const labels = [c.label, ...(c.aliases ?? [])];
+        return labels.some(l => l.startsWith(cmdTyped));
+      }).filter(c => {
+        if (seenTextLabels.has(c.label)) return false;
+        seenTextLabels.add(c.label);
+        return true;
+      });
+      if (matchingFile.length === 0 && matchingText.length === 0) return null;
       return {
         from: line.from, filter: false,
-        options: matching.map((c, i) => ({
-          label:  `/${c}`,
-          detail: CMD_DETAIL[c],
-          boost:  ALL_CMDS.length - i,
-        })),
+        options: [
+          ...matchingFile.map((c, i) => ({
+            label:  `/${c}`,
+            detail: CMD_DETAIL[c],
+            boost:  ALL_CMDS.length - i,
+          })),
+          ...matchingText.map((c, i) => ({
+            label:  `/${c.label}`,
+            detail: c.detail,
+            info:   c.info,
+            boost:  -(i + 1),
+            apply:  (view, completion, from, to) => applyTextCmd(view, { ...c }, from, to),
+            template: c.template,
+            cursorOffset: c.cursorOffset,
+          })),
+        ],
       };
     }
 
@@ -1415,11 +1641,13 @@ function makeSlashSource() {
         label:  desc ? `↵ ${descPreview}` : `create new ${cmd}`,
         detail: cmd === "diagram" ? "⬡ excalidraw" : cmd === "canvas" ? "◈ tldraw" : "¶ note",
         async apply(view, _, from) {
-          // Auto-generate a short unique name — the description is the Claude prompt, not the filename
-          const id   = Date.now().toString(36);          // e.g. "m5j3k2"
-          const name = cmd === "table" ? `table-${id}`
-                     : cmd === "query" ? `query-${id}`
-                     : `${cmd}-${id}`;
+          // Auto-generate a name: slug from description (for tables/queries) or cmd-timestamp for others
+          const id = Date.now().toString(36).slice(-4);   // e.g. "3k2a"
+          const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 24).replace(/-+$/, "");
+          const slug = desc ? slugify(desc) : "";
+          const name = (cmd === "table" || cmd === "query")
+            ? (slug ? `${slug}-${id}` : `${cmd}-${id}`)
+            : `${cmd}-${id}`;
           const lineEnd = view.state.doc.lineAt(from).to;
           let insert, claudePrompt;
           try {
@@ -1469,6 +1697,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [dropPopup, setDropPopup] = useState(null);   // { file, x, y, pos }
   const [styleId,   setStyleId]   = useState(() => localStorage.getItem("ee-note-style") ?? "serif");
   const [colorId,   setColorId]   = useState(() => localStorage.getItem("ee-note-color") ?? "auto");
+  const [linkToast, setLinkToast] = useState("");
   const S = NOTE_STYLES.find(s => s.id === styleId) ?? NOTE_STYLES[0];
   const CP = NOTE_COLOR_PROFILES.find(p => p.id === colorId) ?? NOTE_COLOR_PROFILES[0];
   const C = CP.colors;
@@ -1509,6 +1738,28 @@ function NoteView({ name, onNavigate, onUserSave }) {
     onUserSave?.(name, "note");
   }, [name, onUserSave]);
 
+  // Called when the user deletes an embedded file from preview mode.
+  // Deletes the file (server also strips all ![[]] references from every .md),
+  // then reloads the current note content so the embed disappears here too.
+  const handleEmbedDelete = useCallback(async (embedName, embedType) => {
+    try {
+      if (embedType === "diagram") await api.delDiag(embedName);
+      else if (embedType === "tldraw") await api.delTldraw(embedName);
+      else if (embedType === "duckdb") await api.delTable(embedName);
+    } catch {}
+    // Reload this note — server's removeLinks updated it on disk
+    try {
+      const updated = await api.getNote(name);
+      setRaw(updated);
+      if (cmViewRef.current) {
+        const cur = cmViewRef.current.state.doc.toString();
+        if (cur !== updated) cmViewRef.current.dispatch({
+          changes: { from: 0, to: cur.length, insert: updated },
+        });
+      }
+    } catch {}
+  }, [name]);
+
   const debouncedSave = useDebounced(doSave, 800);
   const debouncedSaveRef = useRef(debouncedSave);
   useEffect(() => { debouncedSaveRef.current = debouncedSave; }, [debouncedSave]);
@@ -1534,7 +1785,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
       state: EditorState.create({
         doc: raw,  // capture initial content at mount time
         extensions: [
-          markdown(),
+          markdown({ base: markdownLanguage }),
           history(),
           keymap.of([...completionKeymap, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -1573,6 +1824,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
               return true;
             },
           }),
+          makeDragReorderPlugin(),
         ],
       }),
       parent: cmContainerRef.current,
@@ -1643,6 +1895,17 @@ function NoteView({ name, onNavigate, onUserSave }) {
       }
       return;
     }
+    // External links — preview pane blocks non-localhost navigation, so copy URL to clipboard.
+    const extLink = e.target.closest("a[data-external]");
+    if (extLink) {
+      e.preventDefault();
+      const url = extLink.dataset.external || extLink.href;
+      const done = () => { setLinkToast("link copied"); setTimeout(() => setLinkToast(""), 2000); };
+      const fail = () => { setLinkToast("copy unavailable"); setTimeout(() => setLinkToast(""), 2000); };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(fail);
+      else fail();
+      return;
+    }
     const wl = e.target.closest("[data-wl]");
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
@@ -1674,7 +1937,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
     view.dispatch({ changes: { from: pos, insert: mdSnippet + "\n" } });
   }, [dropPopup]);
 
-  const segs       = useMemo(() => parseSegments(raw), [raw]);
+  const { fm: noteFm, body: rawBody } = useMemo(() => parseFrontmatter(raw), [raw]);
+  const segs       = useMemo(() => parseSegments(rawBody), [rawBody]);
   const noteStyles = useMemo(() => makeNoteStyles(T, S, C), [T, S, C]);
   const N = C ? { ...T, ...C } : T;
 
@@ -1700,6 +1964,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
           localStorage.setItem("ee-note-color", id);
         }} />
         <div style={{ flex: 1 }} />
+        {linkToast && (
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, transition: "opacity .3s" }}>
+            {linkToast}
+          </span>
+        )}
         {blinks.length > 0 && (
           <Ghost onClick={() => setShowBL(b => !b)} active={showBL} title="Backlinks">
             ← {blinks.length} link{blinks.length !== 1 ? "s" : ""}
@@ -1724,10 +1993,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
           }}>
             <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
+              <FrontmatterPanel fm={noteFm} T={N} />
               {segs.map((seg) =>
-                seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} />
-                : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} />
-                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} />
+                seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
+                : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
+                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} onDelete={handleEmbedDelete} />
                 : <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text) }} />
               )}
             </div>
@@ -1917,6 +2187,8 @@ function makeNoteStyles(T, S = NOTE_STYLES[0], C = null) {
   .note-body a[data-wl] { color: ${N.blue}; text-decoration: none; border-bottom: 1px solid ${N.blue}44; cursor: pointer; }
   .note-body a[data-wl]:hover { border-bottom-color: ${N.blue}; }
   .note-body a { color: ${N.blue}; }
+  .note-body a[data-external]::after { content: " ↗"; font-size: 0.75em; opacity: 0.6; vertical-align: super; }
+  .note-body a[data-external]:hover { text-decoration: underline; }
   .note-body code { font-family: ${T.mono}; font-size: .85em; background: ${N.surface2}; padding: .15em .35em; border-radius: 3px; color: ${N.orange}; }
   .note-body pre { background: ${N.surface2}; border: 1px solid ${N.border}; border-radius: 6px; padding: 14px 16px; overflow-x: auto; margin: 1em 0; }
   .note-body pre code { background: none; padding: 0; color: ${N.text}; font-size: 12px; }
@@ -2265,6 +2537,8 @@ function App() {
   const [notes,       setNotes]       = useState([]);
   const [codeFiles,   setCodeFiles]   = useState([]);
   const [tableFiles,  setTableFiles]  = useState([]);
+  const [pdfFiles,    setPdfFiles]    = useState([]);
+  const [csvFiles,    setCsvFiles]    = useState([]);
   const [recent,      setRecent]      = useState([]); // [{name, type, at}]
   const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem("ee-tabs") ?? "[]"); } catch { return []; } });
   const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem("ee-active") ?? "null"); } catch { return null; } });
@@ -2282,6 +2556,8 @@ function App() {
     const [d, tl, n, c, r] = await Promise.all([api.diagrams(), api.tldrawList(), api.notes(), api.codeFiles(), api.recent()]);
     setDiagrams(d); setTldrawFiles(tl); setNotes(n); setCodeFiles(c); setRecent(r);
     api.tables().then(setTableFiles).catch(() => {});
+    fetch("/api/pdfs").then(r => r.json()).then(setPdfFiles).catch(() => {});
+    fetch("/api/csvs").then(r => r.json()).then(setCsvFiles).catch(() => {});
   }, []);
 
   // Lightweight variant — only refreshes the recent list (skips 3 glob scans).
@@ -2342,8 +2618,12 @@ function App() {
       const diagMatch  = diagrams.find(d => d.toLowerCase() === lo);
       const tldrMatch  = tldrawFiles.find(t => t.toLowerCase() === lo);
       const tableMatch = tableFiles.find(t => t.toLowerCase() === lo);
+      const pdfMatch   = pdfFiles.find(p => p.toLowerCase() === lo);
+      const csvMatch   = csvFiles.find(p => p.toLowerCase() === lo);
 
       if      (tableMatch)                               { resolved = "table";   name = tableMatch; }
+      else if (pdfMatch)                                 { resolved = "pdf";     name = pdfMatch; }
+      else if (csvMatch)                                 { resolved = "csv";     name = csvMatch; }
       else if (noteMatch && !diagMatch && !tldrMatch)    { resolved = "note";    name = noteMatch; }
       else if (diagMatch && !noteMatch && !tldrMatch)    { resolved = "diagram"; name = diagMatch; }
       else if (tldrMatch && !noteMatch && !diagMatch)    { resolved = "tldraw";  name = tldrMatch; }
@@ -2364,7 +2644,7 @@ function App() {
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
     setActive(tab);
-  }, [notes, diagrams, tldrawFiles, tableFiles]);
+  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
@@ -2445,7 +2725,7 @@ function App() {
         connected={connected}
         onExport={() => setShowExp(true)}
         onHistory={() => setShowHist(h => !h)}
-        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} recent={recent}
+        diagrams={diagrams} tldrawFiles={tldrawFiles} notes={notes} codeFiles={codeFiles} tableFiles={tableFiles} pdfFiles={pdfFiles} csvFiles={csvFiles} recent={recent}
         onOpen={openFile} onDelete={handleDelete}
       />
 
@@ -2460,8 +2740,18 @@ function App() {
                 : active.type === "code"
                   ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
                   : active.type === "table"
-                    ? <TableView key={active.name + ":table"} name={active.name} T={T} />
-                    : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
+                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile}
+                        onRename={newName => {
+                          // EditableFilename already called api.rename; just sync tab state.
+                          // SSE will fire refresh() automatically.
+                          setTabs(t => t.map(x => x.name === active.name && x.type === "table" ? { ...x, name: newName } : x));
+                          setActive(a => a?.name === active.name && a?.type === "table" ? { ...a, name: newName } : a);
+                        }} />
+                    : active.type === "pdf"
+                      ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
+                      : active.type === "csv"
+                        ? <CsvView key={active.name + ":csv"} name={active.name} T={T} />
+                        : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
           }
         </div>
 

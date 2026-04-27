@@ -31,8 +31,8 @@ import { glob }          from "glob";
 import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
-import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
-import { runQuery, runExec, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
+import { ROOT, validateName, rewriteLinks, removeLinks, findBacklinks, listSnapshots } from "./workspace.js";
+import { runQuery, runExec, queryCsv, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -248,7 +248,7 @@ function safeName(raw) {
     // but the name segment may carry extra encoding from the client).
     const decoded = decodeURIComponent(String(raw || ""));
     // Strip all three supported extensions
-    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb)$/i, "");
+    const stripped = decoded.replace(/\.(excalidraw|tldraw|md|duckdb|pdf|csv)$/i, "");
     return validateName(stripped);
   } catch {
     return null;
@@ -457,6 +457,47 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         return json(res, files.map(f => f.replace(/\.duckdb$/, "")).sort());
       }
 
+      // ── PDFs list
+      if (pathname === "/api/pdfs") {
+        const files = await glob("**/*.pdf", { cwd: CWD, ignore: ["node_modules/**"] });
+        return json(res, files.map(f => f.replace(/\.pdf$/, "")).sort());
+      }
+
+      // ── PDF inline serving
+      const pdfm = pathname.match(/^\/api\/pdf\/(.+)$/);
+      if (pdfm) {
+        const name = safeName(pdfm[1]);
+        if (!name) return json(res, { error: "invalid name" }, 400);
+        const fp = path.join(CWD, `${name}.pdf`);
+        try {
+          const buf = await fs.readFile(fp);
+          res.writeHead(200, {
+            "Content-Type": "application/pdf",
+            "Cache-Control": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+          });
+          return res.end(buf);
+        } catch { return json(res, { error: "not found" }, 404); }
+      }
+
+      // ── CSVs list
+      if (pathname === "/api/csvs") {
+        const files = await glob("**/*.csv", { cwd: CWD, ignore: ["node_modules/**"] });
+        return json(res, files.map(f => f.replace(/\.csv$/, "")).sort());
+      }
+
+      // ── CSV query
+      const csvm = pathname.match(/^\/api\/csv\/(.+)$/);
+      if (csvm) {
+        const name = safeName(csvm[1]);
+        if (!name) return json(res, { error: "invalid name" }, 400);
+        const fp = path.join(CWD, `${name}.csv`);
+        try {
+          const result = await queryCsv(fp);
+          return json(res, result);
+        } catch (e) { return json(res, { error: e.message }, 400); }
+      }
+
       // ── Recent
       if (pathname === "/api/recent") return json(res, await loadRecent());
 
@@ -489,8 +530,12 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           return json(res, { ok: true });
         }
         if (method === "DELETE") {
-          try { await fs.unlink(fp); broadcast("diagram:deleted", { name, op: "deleted" }); return json(res, { ok: true }); }
-          catch { return json(res, { error: "not found" }, 404); }
+          try {
+            await fs.unlink(fp);
+            broadcast("diagram:deleted", { name, op: "deleted" });
+            removeLinks(name, "excalidraw").catch(() => {});
+            return json(res, { ok: true });
+          } catch { return json(res, { error: "not found" }, 404); }
         }
         res.writeHead(405); return res.end();
       }
@@ -525,8 +570,12 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           return json(res, { ok: true });
         }
         if (method === "DELETE") {
-          try { await fs.unlink(fp); broadcast("tldraw:deleted", { name, op: "deleted" }); return json(res, { ok: true }); }
-          catch { return json(res, { error: "not found" }, 404); }
+          try {
+            await fs.unlink(fp);
+            broadcast("tldraw:deleted", { name, op: "deleted" });
+            removeLinks(name, "tldraw").catch(() => {});
+            return json(res, { ok: true });
+          } catch { return json(res, { error: "not found" }, 404); }
         }
         res.writeHead(405); return res.end();
       }
@@ -568,8 +617,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         const rawSeg = tbm[1];
         const isRows  = rawSeg.endsWith("/rows");
         const isQuery = rawSeg.endsWith("/query");
+        const isView  = rawSeg.endsWith("/view");
         const rawName = isRows  ? rawSeg.slice(0, -5)
                       : isQuery ? rawSeg.slice(0, -6)
+                      : isView  ? rawSeg.slice(0, -5)
                       : rawSeg;
         const name = safeName(rawName);
         if (!name) return json(res, { error: "invalid name" }, 400);
@@ -617,11 +668,35 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           const body = await readBody(req);
           if (!body?.table || !Array.isArray(body.rows)) return json(res, { error: "expected {table, rows}" }, 400);
           try {
+            const safeTable = body.table.replace(/"/g, '""');
+            // Group rows by column signature for batch inserts
+            const byKey = new Map();
             for (const row of body.rows) {
-              const cols = Object.keys(row).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
-              const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null || v === undefined ? "NULL" : v)).join(", ");
-              await runExec(fp, `INSERT OR REPLACE INTO "${body.table.replace(/"/g, '""')}" (${cols}) VALUES (${vals})`, tableDir);
+              const key = Object.keys(row).join("\0");
+              if (!byKey.has(key)) byKey.set(key, []);
+              byKey.get(key).push(row);
             }
+            for (const batch of byKey.values()) {
+              const cols = Object.keys(batch[0]).map(c => `"${c.replace(/"/g, '""')}"`).join(", ");
+              const allVals = batch.map(row => {
+                const vals = Object.values(row).map(v => typeof v === "string" ? `'${v.replace(/'/g, "''")}'` : (v === null || v === undefined ? "NULL" : v)).join(", ");
+                return `(${vals})`;
+              }).join(", ");
+              const sql = `INSERT OR REPLACE INTO "${safeTable}" (${cols}) VALUES ${allVals}`;
+              try {
+                await runExec(fp, sql, tableDir);
+              } catch (e) {
+                if (e.message?.includes('UNIQUE/PRIMARY KEY') || e.message?.includes('ON CONFLICT') || e.message?.includes('INSERT OR REPLACE')) {
+                  await runExec(fp, sql.replace("INSERT OR REPLACE INTO", "INSERT INTO"), tableDir);
+                } else {
+                  throw e;
+                }
+              }
+            }
+            // Stamp _ee_updated_at so the browser can show "last updated"
+            const ts = new Date().toISOString();
+            await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('updated_at', '${ts}')`);
             broadcast("table:changed", { name, op: "updated" });
             return json(res, { ok: true, count: body.rows.length });
           } catch (e) { return json(res, { error: e.message }, 400); }
@@ -633,6 +708,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
             duckCloseOne(fp);  // evict from pool before unlinking
             await fs.unlink(fp);
             broadcast("table:deleted", { name, op: "deleted" });
+            removeLinks(name, "duckdb").catch(() => {});
             return json(res, { ok: true });
           } catch { return json(res, { error: "not found" }, 404); }
         }
@@ -644,6 +720,53 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           try {
             const result = await runQuery(fp, body.sql, tableDir);
             return json(res, result);
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        // POST /api/table/:name/view — create or replace a named VIEW
+        // Body: { view_name: string, sql: string }
+        if (method === "POST" && isView) {
+          const body = await readBody(req);
+          if (!body?.view_name || !body?.sql) return json(res, { error: "expected {view_name, sql}" }, 400);
+          const safeView = String(body.view_name).replace(/"/g, '""');
+          try {
+            // Ensure the file exists with a meta table
+            await fs.mkdir(tableDir, { recursive: true });
+            await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', 'query')`);
+
+            // Create the view
+            await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS ${body.sql}`, tableDir);
+
+            // Detect workspace file references and augment if found
+            const { columns, rows } = await runQuery(fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir);
+            const [diagrams, notes, tldrawFiles, tables] = await Promise.all([
+              glob("**/*.excalidraw", { cwd: CWD, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
+              glob("**/*.md",         { cwd: CWD, ignore: ["node_modules/**"] }),
+              glob("**/*.tldraw",     { cwd: CWD, ignore: ["node_modules/**"] }),
+              glob("**/*.duckdb",     { cwd: CWD, ignore: ["node_modules/**"] }),
+            ]);
+            const wsNames = new Set([
+              ...diagrams.map(f => f.replace(/\.excalidraw$/, "")),
+              ...notes   .map(f => f.replace(/\.md$/, "")),
+              ...tldrawFiles.map(f => f.replace(/\.tldraw$/, "")),
+              ...tables  .map(f => f.replace(/\.duckdb$/, "")),
+            ]);
+            const normalise = v => String(v ?? "").replace(/^\.?\//, "").replace(/\.(excalidraw|md|tldraw|duckdb)$/i, "");
+            const refCols = columns.filter(col =>
+              rows.some(r => typeof r[col] === "string" && r[col] && wsNames.has(normalise(r[col])))
+            );
+            if (refCols.length > 0) {
+              const linkExprs = refCols.map(col => {
+                const sc = col.replace(/"/g, '""');
+                return `regexp_replace(regexp_replace("${sc}", '^\\./|^/', ''), '\\.(excalidraw|md|tldraw|duckdb)$', '') AS "${sc}_name"`;
+              });
+              await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS SELECT *, ${linkExprs.join(", ")} FROM (${body.sql})`, tableDir);
+            }
+
+            broadcast("table:changed", { name, op: "created" });
+            const sample = await runQuery(fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir);
+            return json(res, { ok: true, view_name: body.view_name, refCols, sample });
           } catch (e) { return json(res, { error: e.message }, 400); }
         }
 
@@ -903,7 +1026,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
               "Cache-Control": "no-cache",
             };
             // Force download for active-content types to prevent script execution
-            if (mediaExt === ".svg" || mediaExt === ".pdf") {
+            if (mediaExt === ".svg") {
               headers["Content-Disposition"] = "attachment";
             }
             res.writeHead(200, headers);
