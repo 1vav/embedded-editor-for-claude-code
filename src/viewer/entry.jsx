@@ -20,7 +20,7 @@ import { syntaxHighlighting, defaultHighlightStyle, syntaxTree, indentOnInput, b
 import { closeBrackets, closeBracketsKeymap, autocompletion, startCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { searchKeymap } from "@codemirror/search";
 // Bundled languages (always in main chunk)
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { javascript } from "@codemirror/lang-javascript";
 import { python }     from "@codemirror/lang-python";
 import { json as jsonLang } from "@codemirror/lang-json";
@@ -1720,7 +1720,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
       state: EditorState.create({
         doc: raw,  // capture initial content at mount time
         extensions: [
-          markdown(),
+          markdown({ base: markdownLanguage }),
           history(),
           keymap.of([...completionKeymap, indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
