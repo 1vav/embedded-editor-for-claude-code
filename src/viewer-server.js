@@ -693,6 +693,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
                 }
               }
             }
+            // Stamp _ee_updated_at so the browser can show "last updated"
+            const ts = new Date().toISOString();
+            await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('updated_at', '${ts}')`);
             broadcast("table:changed", { name, op: "updated" });
             return json(res, { ok: true, count: body.rows.length });
           } catch (e) { return json(res, { error: e.message }, 400); }

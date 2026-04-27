@@ -457,6 +457,11 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
           }
         }
       }
+      // Stamp _ee_updated_at in the meta table so the browser can show "last updated"
+      const ts = new Date().toISOString();
+      await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+      await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('updated_at', '${ts}')`);
+
       return { content: [{ type: "text", text: `Wrote ${rows.length} row(s) to ${name}.duckdb / ${table}` }] };
     }
   );

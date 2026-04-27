@@ -285,10 +285,12 @@ const _linkOpen = md.renderer.rules.link_open
 md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
   const href = tokens[idx].attrGet("href") || "";
   if (/^https?:\/\//.test(href)) {
-    tokens[idx].attrSet("target", "_blank");
-    tokens[idx].attrSet("rel",    "noopener noreferrer");
-    tokens[idx].attrSet("title",  href);
-    tokens[idx].attrSet("data-external", "true");
+    // Claude Code Preview blocks non-localhost navigation. Store the real URL
+    // in data-external and use href="#" so the browser never tries to navigate.
+    // The click handler will copy the URL to clipboard instead.
+    tokens[idx].attrSet("href",          "#");
+    tokens[idx].attrSet("data-external", href);
+    tokens[idx].attrSet("title",         href + " (click to copy)");
   }
   return _linkOpen(tokens, idx, opts, env, self);
 };
@@ -1693,6 +1695,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [dropPopup, setDropPopup] = useState(null);   // { file, x, y, pos }
   const [styleId,   setStyleId]   = useState(() => localStorage.getItem("ee-note-style") ?? "serif");
   const [colorId,   setColorId]   = useState(() => localStorage.getItem("ee-note-color") ?? "auto");
+  const [linkToast, setLinkToast] = useState("");
   const S = NOTE_STYLES.find(s => s.id === styleId) ?? NOTE_STYLES[0];
   const CP = NOTE_COLOR_PROFILES.find(p => p.id === colorId) ?? NOTE_COLOR_PROFILES[0];
   const C = CP.colors;
@@ -1890,9 +1893,16 @@ function NoteView({ name, onNavigate, onUserSave }) {
       }
       return;
     }
-    // External links — let the browser open them (target=_blank set by renderer)
+    // External links — preview pane blocks non-localhost navigation, so copy URL to clipboard.
     const extLink = e.target.closest("a[data-external]");
-    if (extLink) return;  // don't preventDefault — browser handles it
+    if (extLink) {
+      e.preventDefault();
+      const url = extLink.dataset.external || extLink.href;
+      const done = () => { setLinkToast("link copied"); setTimeout(() => setLinkToast(""), 2000); };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(done);
+      else done();
+      return;
+    }
     const wl = e.target.closest("[data-wl]");
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
@@ -1951,6 +1961,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
           localStorage.setItem("ee-note-color", id);
         }} />
         <div style={{ flex: 1 }} />
+        {linkToast && (
+          <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, transition: "opacity .3s" }}>
+            {linkToast}
+          </span>
+        )}
         {blinks.length > 0 && (
           <Ghost onClick={() => setShowBL(b => !b)} active={showBL} title="Backlinks">
             ← {blinks.length} link{blinks.length !== 1 ? "s" : ""}
@@ -2722,7 +2737,7 @@ function App() {
                 : active.type === "code"
                   ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
                   : active.type === "table"
-                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile} />
+                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile} onRename={newName => handleRename(active, newName)} />
                     : active.type === "pdf"
                       ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
                       : active.type === "csv"

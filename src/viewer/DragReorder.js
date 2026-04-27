@@ -261,6 +261,53 @@ export function parseBlocks(state) {
   groups.push(...parseTableRowGroups(state));
   groups.push(...parseListItemGroups(state));
   groups.push(...parseSectionGroups(state));
+  groups.push(...parseParagraphGroups(state));
+  return groups;
+}
+
+// ── parseParagraphGroups ──────────────────────────────────────────────────────
+// Treats adjacent top-level paragraphs as sibling blocks.
+// A paragraph gets a drag handle only when at least one adjacent peer exists,
+// so lone paragraphs are left alone.
+
+function parseParagraphGroups(state) {
+  const docLen = state.doc.length;
+  const paragraphs = [];
+
+  syntaxTree(state).iterate({
+    enter(node) {
+      // Only top-level Paragraph nodes (direct children of Document).
+      if (node.name !== "Paragraph") return;
+      // Skip paragraphs inside lists or blockquotes (they have non-Document parents).
+      // lezer exposes parent access only via cursor; use the simple heuristic that
+      // a top-level paragraph's from/to lines are at depth 1.
+      const line = state.doc.lineAt(node.from);
+      const from = line.from;
+      const toLine = state.doc.lineAt(node.to);
+      const to = toLine.to + 1 <= docLen ? toLine.to + 1 : toLine.to;
+      paragraphs.push({ from, to });
+      return false; // don't recurse into paragraph content
+    },
+  });
+
+  if (paragraphs.length < 2) return [];
+
+  // Group consecutive paragraphs (no non-whitespace content between them).
+  const groups = [];
+  let current = [paragraphs[0]];
+  for (let i = 1; i < paragraphs.length; i++) {
+    const prev = paragraphs[i - 1];
+    const curr = paragraphs[i];
+    const gap = state.doc.sliceString(prev.to, curr.from).trim();
+    if (gap === "") {
+      current.push(curr);
+    } else {
+      if (current.length >= 2) groups.push({ type: "paragraphs", blocks: current });
+      current = [curr];
+    }
+  }
+  if (current.length >= 2) groups.push({ type: "paragraphs", blocks: current });
+
   return groups;
 }
 

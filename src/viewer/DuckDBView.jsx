@@ -30,7 +30,7 @@ const api = {
     fetch(`/api/table/${enc(name)}/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Origin": location.origin },
-      body: JSON.stringify({ sql: "SELECT value FROM _ee_meta WHERE key='created_by'" }),
+      body: JSON.stringify({ sql: "SELECT key, value FROM _ee_meta WHERE key IN ('created_by', 'updated_at')" }),
     }).then(r => r.json()),
   listUserTables: (name) =>
     fetch(`/api/table/${enc(name)}/query`, {
@@ -44,9 +44,77 @@ const api = {
       headers: { "Content-Type": "application/json", "Origin": location.origin },
       body: JSON.stringify({ view_name, sql }),
     }).then(r => r.json()),
+  rename: (from, to, type) =>
+    fetch("/api/rename", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Origin": location.origin },
+      body: JSON.stringify({ from, to, type }),
+    }).then(r => r.json()),
 };
 
 // Auto-detect the best column to group by (status/state/type/category/priority).
+// ── Relative timestamp ────────────────────────────────────────────────────────
+function fmtRelative(isoStr) {
+  const ms = Date.now() - new Date(isoStr).getTime();
+  const s = Math.floor(ms / 1000);
+  if (s < 60)  return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30)  return `${d}d ago`;
+  return new Date(isoStr).toLocaleDateString();
+}
+
+// ── Editable filename ─────────────────────────────────────────────────────────
+// Clicking the filename makes it editable; Enter/blur commits via POST /api/rename.
+function EditableFilename({ name, type, T, onRename }) {
+  const [editing, setEditing] = useState(false);
+  const [value,   setValue]   = useState(name);
+  const inputRef = useRef(null);
+
+  useEffect(() => { setValue(name); }, [name]);
+
+  function startEdit(e) {
+    e.stopPropagation();
+    setEditing(true);
+    setTimeout(() => { inputRef.current?.select(); }, 0);
+  }
+
+  async function commit() {
+    setEditing(false);
+    const newName = value.trim().replace(/\.duckdb$/i, "");
+    if (!newName || newName === name) { setValue(name); return; }
+    setValue(newName);
+    const res = await api.rename(name + ".duckdb", newName + ".duckdb", type).catch(() => null);
+    if (res?.error) { setValue(name); return; }
+    onRename?.(newName);
+  }
+
+  if (editing) {
+    return (
+      <input ref={inputRef} value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setEditing(false); setValue(name); } }}
+        style={{
+          fontFamily: T.mono, fontSize: 12, fontWeight: 600, color: T.duck,
+          background: T.surface2, border: `1px solid ${T.duck}55`, borderRadius: 4,
+          padding: "1px 6px", outline: "none", width: `${Math.max(80, value.length * 8)}px`,
+        }}
+      />
+    );
+  }
+  return (
+    <span onClick={startEdit} title="Click to rename"
+      style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 600, color: T.duck,
+        cursor: "text", borderBottom: `1px dotted ${T.duck}44` }}>
+      {name}.duckdb
+    </span>
+  );
+}
+
 // ── Wikilink cell renderer ────────────────────────────────────────────────────
 // Renders a table cell value. If the value looks like a workspace file reference
 // (ends in a known extension, or matches [[name]] syntax) it becomes a clickable
@@ -108,11 +176,12 @@ function detectGroupCol(columns) {
   return loose ?? null;
 }
 
-export function TableView({ name, T, onOpen }) {
+export function TableView({ name, T, onOpen, onRename }) {
   const [dataView,    setDataView]    = useState(() => localStorage.getItem(`ee-table-view-${name}`) ?? "table");
   const [queryOpen,   setQueryOpen]   = useState(false);
   const [liveSync,    setLiveSync]    = useState(() => localStorage.getItem(`ee-table-sync-${name}`) === "live");
   const [isQuery,     setIsQuery]     = useState(false);
+  const [updatedAt,   setUpdatedAt]   = useState(null);
   const [activeTable, setActiveTable] = useState(null);
   const [result,      setResult]      = useState({ columns: [], rows: [], rowCount: 0 });
   const [sqlText,     setSqlText]     = useState("");
@@ -177,8 +246,9 @@ export function TableView({ name, T, onOpen }) {
     }).catch(() => {});
     api.getMeta(name).then(({ rows }) => {
       if (cancelled) return;
-      const createdBy = rows?.[0]?.value ?? "table";
-      setIsQuery(createdBy === "query");
+      const meta = Object.fromEntries((rows ?? []).map(r => [r.key, r.value]));
+      setIsQuery(meta.created_by === "query");
+      if (meta.updated_at) setUpdatedAt(meta.updated_at);
     }).catch(() => {});
     return () => { cancelled = true; };
   }, [name]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -268,8 +338,13 @@ export function TableView({ name, T, onOpen }) {
       {/* Toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "7px 12px",
         borderBottom: `1px solid ${T.border}`, background: T.surface, flexShrink: 0, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: T.mono, fontSize: 11, color: T.duck, fontWeight: 600 }}>{name}.duckdb</span>
+        <EditableFilename name={name} type="table" T={T} onRename={n => { onRename?.(n); onOpen?.(n, "table"); }} />
         <span style={{ fontFamily: T.mono, fontSize: 11, color: T.muted }}>· {result.rowCount ?? result.rows.length} rows</span>
+        {updatedAt && (
+          <span title={new Date(updatedAt).toLocaleString()} style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, opacity: 0.6 }}>
+            · updated {fmtRelative(updatedAt)}
+          </span>
+        )}
         <span style={{ color: T.border2, margin: "0 3px" }}>|</span>
         {ghost("⌘ Query", queryOpen, () => setQueryOpen(o => !o), "Toggle SQL query pane")}
         {ghost("≡ Table", dataView === "table", () => toggleDataView("table"), "Table view")}
@@ -378,6 +453,32 @@ function exportCsv({ columns, rows }) {
 
 function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
   const { columns, rows } = result;
+  const [sortCol, setSortCol] = useState(null);
+  const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
+
+  function handleSort(col) {
+    if (sortCol === col) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  }
+
+  // Sort rows by sortCol, preserving original indices for onCellBlur.
+  const indexedRows = rows.map((row, origIndex) => ({ row, origIndex }));
+  if (sortCol) {
+    indexedRows.sort(({ row: a }, { row: b }) => {
+      const av = String(a[sortCol] ?? "");
+      const bv = String(b[sortCol] ?? "");
+      const numA = parseFloat(av), numB = parseFloat(bv);
+      const cmp = (!isNaN(numA) && !isNaN(numB))
+        ? numA - numB
+        : av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }
+
   if (!columns?.length) return (
     <div style={{ padding: 20, color: T.muted, fontFamily: T.mono, fontSize: 12 }}>
       No data. Run a query or add rows.
@@ -388,17 +489,19 @@ function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
       <thead>
         <tr>
           {columns.map(c => (
-            <th key={c} style={{ padding: "7px 12px", textAlign: "left", fontSize: 10, fontWeight: 500,
-              color: T.muted, letterSpacing: ".06em", textTransform: "uppercase",
-              borderBottom: `1px solid ${T.border}`, background: T.surface, whiteSpace: "nowrap" }}>
-              {c}
+            <th key={c} onClick={() => handleSort(c)}
+              style={{ padding: "7px 12px", textAlign: "left", fontSize: 10, fontWeight: 500,
+                color: sortCol === c ? T.duck : T.muted, letterSpacing: ".06em", textTransform: "uppercase",
+                borderBottom: `1px solid ${T.border}`, background: T.surface, whiteSpace: "nowrap",
+                cursor: "pointer", userSelect: "none" }}>
+              {c}{sortCol === c ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
             </th>
           ))}
         </tr>
       </thead>
       <tbody>
-        {rows.map((row, ri) => (
-          <tr key={ri} style={{ borderBottom: `1px solid ${T.border}` }}>
+        {indexedRows.map(({ row, origIndex }) => (
+          <tr key={origIndex} style={{ borderBottom: `1px solid ${T.border}` }}>
             {columns.map(c => {
               const val = String(row[c] ?? "");
               const isLink = WIKILINK_RE.test(val) || WS_EXT_RE.test(val);
@@ -408,7 +511,7 @@ function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
                 </td>
               ) : (
                 <td key={c} contentEditable suppressContentEditableWarning
-                  onBlur={e => onCellBlur(ri, c, e.currentTarget.textContent)}
+                  onBlur={e => onCellBlur(origIndex, c, e.currentTarget.textContent)}
                   onFocus={e => e.currentTarget.style.background = T.surface2}
                   onBlurCapture={e => e.currentTarget.style.background = "transparent"}
                   style={{ padding: "7px 12px", color: T.textDim, outline: "none", whiteSpace: "nowrap" }}>
@@ -651,9 +754,28 @@ function TableEmbedDeleteBtn({ name, T, onDelete }) {
 }
 
 export function TableEmbed({ name, T, onOpen, onDelete }) {
-  const [view,    setView]    = useState(() => localStorage.getItem(`ee-embed-view-${name}`) ?? "table");
-  const [result,  setResult]  = useState({ columns: [], rows: [], rowCount: 0 });
-  const [loading, setLoading] = useState(true);
+  const [view,      setView]      = useState(() => localStorage.getItem(`ee-embed-view-${name}`) ?? "table");
+  const [result,    setResult]    = useState({ columns: [], rows: [], rowCount: 0 });
+  const [loading,   setLoading]   = useState(true);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [sortCol,   setSortCol]   = useState(null);
+  const [sortDir,   setSortDir]   = useState("asc");
+
+  function handleEmbedSort(col) {
+    if (sortCol === col) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortCol(col);
+      setSortDir("asc");
+    }
+  }
+
+  useEffect(() => {
+    api.getMeta(name).then(({ rows }) => {
+      const meta = Object.fromEntries((rows ?? []).map(r => [r.key, r.value]));
+      if (meta.updated_at) setUpdatedAt(meta.updated_at);
+    }).catch(() => {});
+  }, [name]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
@@ -695,8 +817,9 @@ export function TableEmbed({ name, T, onOpen, onDelete }) {
           <circle cx="21.5" cy="5.5" r="1" fill="#0d0d0d"/>
           <path d="M23.5 7.5 L26.5 8 L23.5 9Z" fill="#fb923c"/>
         </svg>
-        <span style={{ fontFamily: T.mono, fontSize: 12, fontWeight: 600, color: T.duck }}>{name}.duckdb</span>
+        <EditableFilename name={name} type="table" T={T} onRename={n => onOpen?.(n, "table")} />
         {!loading && <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted }}>· {rowCount ?? rows.length} rows</span>}
+        {updatedAt && <span title={new Date(updatedAt).toLocaleString()} style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, opacity: 0.55 }}>· {fmtRelative(updatedAt)}</span>}
         <span style={{ flex: 1 }} />
         <span onClick={toggleView} title="Toggle view" style={{
           fontSize: 10, color: T.muted, border: `1px solid ${T.border2}`, padding: "2px 7px",
@@ -709,34 +832,48 @@ export function TableEmbed({ name, T, onOpen, onDelete }) {
         {onDelete && <TableEmbedDeleteBtn name={name} T={T} onDelete={onDelete} />}
       </div>
       {loading && <div style={{ padding: "10px 12px", color: T.muted, fontFamily: T.mono, fontSize: 11 }}>Loading…</div>}
-      {!loading && view === "table" && columns.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: T.mono }}>
-            <thead>
-              <tr>
-                {columns.map(c => (
-                  <th key={c} style={{ padding: "5px 10px", textAlign: "left", fontSize: 9, fontWeight: 500,
-                    color: T.muted, letterSpacing: ".06em", textTransform: "uppercase",
-                    borderBottom: `1px solid ${T.border}`, background: T.surface, whiteSpace: "nowrap" }}>
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 10).map((row, ri) => (
-                <tr key={ri} style={{ borderBottom: `1px solid ${T.border}` }}>
+      {!loading && view === "table" && columns.length > 0 && (() => {
+        const sortedRows = sortCol
+          ? [...rows].sort((a, b) => {
+              const av = String(a[sortCol] ?? ""), bv = String(b[sortCol] ?? "");
+              const numA = parseFloat(av), numB = parseFloat(bv);
+              const cmp = (!isNaN(numA) && !isNaN(numB))
+                ? numA - numB
+                : av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
+              return sortDir === "asc" ? cmp : -cmp;
+            })
+          : rows;
+        return (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: T.mono }}>
+              <thead>
+                <tr>
                   {columns.map(c => (
-                    <td key={c} style={{ padding: "5px 10px", color: T.textDim, whiteSpace: "nowrap" }}>
-                      <CellValue value={row[c]} T={T} onOpen={onOpen} />
-                    </td>
+                    <th key={c} onClick={() => handleEmbedSort(c)}
+                      style={{ padding: "5px 10px", textAlign: "left", fontSize: 9, fontWeight: 500,
+                        color: sortCol === c ? T.duck : T.muted, letterSpacing: ".06em", textTransform: "uppercase",
+                        borderBottom: `1px solid ${T.border}`, background: T.surface, whiteSpace: "nowrap",
+                        cursor: "pointer", userSelect: "none" }}>
+                      {c}{sortCol === c ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {sortedRows.slice(0, 10).map((row, ri) => (
+                  <tr key={ri} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    {columns.map(c => (
+                      <td key={c} style={{ padding: "5px 10px", color: T.textDim, whiteSpace: "nowrap" }}>
+                        <CellValue value={row[c]} T={T} onOpen={onOpen} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
       {!loading && view === "chips" && rows.length > 0 && (
         <div style={{ padding: "8px 10px", display: "flex", gap: 6, flexWrap: "wrap" }}>
           {rows.map((row, ri) => {
