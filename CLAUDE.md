@@ -155,6 +155,18 @@ curl -s --compressed http://127.0.0.1:3000/vendor/viewer.js | grep -c "your-new-
 
 Revert the version suffix before releasing.
 
+## Known Install Warnings (expected, not actionable)
+
+Running `npm install` prints deprecation warnings for `inflight`, `rimraf@3`, `glob@7/8`, `tar@6`, `gauge`, `are-we-there-yet`, `npmlog`, and `@npmcli/move-file`. **These are expected and harmless.** They all trace to:
+
+```
+duckdb → node-gyp@^9.4.1 → (old build tooling)
+```
+
+DuckDB pins `node-gyp` at v9, which uses outdated npm internals. In practice `node-pre-gyp` downloads a pre-built DuckDB binary and `node-gyp` never compiles anything — the warnings are just npm resolving the dependency tree.
+
+**Do not** add `node-gyp` to `overrides` to suppress them — that risks breaking DuckDB's build fallback on platforms without pre-built binaries (Alpine, uncommon ARM targets). Wait for DuckDB to update their own `node-gyp` pin.
+
 ## npm Publish — OIDC Trusted Publisher
 
 Releases are fully automated via `.github/workflows/release-on-merge.yml`. **Never run `npm publish` locally.**
