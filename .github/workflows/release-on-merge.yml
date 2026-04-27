@@ -6,10 +6,11 @@ name: Release on merge to main
 #   2. Creates and pushes a "v{version}" git tag
 #   3. Creates a GitHub Release with changelog notes
 #
-# Authentication: uses the npmjs.com trusted publisher OIDC flow.
-# npm CLI does NOT auto-exchange OIDC tokens — the exchange must be done explicitly.
-# The "Obtain npm token" step requests a GitHub OIDC token (audience=npm:publish),
-# POSTs it to the npmjs OIDC endpoint, and writes the returned token to NODE_AUTH_TOKEN.
+# Authentication: npmjs.com trusted publisher OIDC flow.
+# npm CLI v11.5.1+ handles the OIDC exchange automatically — no manual curl needed.
+# Node 22 ships with npm v10, so we upgrade npm to latest (≥11.5.1) explicitly.
+# registry-url is intentionally OMITTED from setup-node: setting it injects
+# NODE_AUTH_TOKEN=github.token into GITHUB_ENV which overrides OIDC auth.
 #
 # All three steps happen in one job so we don't need a cross-workflow trigger
 # (GITHUB_TOKEN cannot trigger other workflows).
@@ -56,8 +57,13 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
+          node-version: '22'
+          # registry-url intentionally omitted — setting it injects NODE_AUTH_TOKEN=github.token
+          # which blocks OIDC auth. npm's default registry is https://registry.npmjs.org.
+
+      - name: Upgrade npm to ≥11.5.1 (required for OIDC auto-exchange)
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        run: npm install -g npm@latest
 
       - name: Install dependencies
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
@@ -67,24 +73,11 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm run build
 
-      - name: Obtain npm token via OIDC exchange
-        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
-        run: |
-          OIDC_TOKEN=$(curl -fsSL \
-            -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:publish" \
-            | jq -r '.value')
-          NPM_TOKEN=$(curl -fsSL -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"oidcToken\": \"${OIDC_TOKEN}\"}" \
-            "https://registry.npmjs.org/-/npm/v1/login/oidc" \
-            | jq -r '.token')
-          echo "::add-mask::${NPM_TOKEN}"
-          echo "NODE_AUTH_TOKEN=${NPM_TOKEN}" >> "${GITHUB_ENV}"
-
       - name: Publish to npm
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm publish --access public --provenance
+        # npm CLI exchanges the GitHub OIDC token with the npmjs trusted publisher
+        # automatically. No NODE_AUTH_TOKEN needed — omitting it is what enables OIDC.
 
       - name: Create and push git tag
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
