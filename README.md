@@ -132,6 +132,7 @@ Embed a live preview in any note with `![[velocity.duckdb]]` — it renders an i
 | `write_rows` | Upsert rows into a table (batched — all rows in one SQL statement) |
 | `delete_rows` | Delete rows matching a WHERE clause |
 | `query_table` | Run arbitrary SQL; optional `save_as` inserts results into another table |
+| `create_view` | Create a named DuckDB VIEW — a saved SQL query that re-executes dynamically on every read. Any column whose values match workspace file names gets a companion `_name` column with `[[wikilinks]]`; the browser renders those cells as clickable navigation links. |
 
 **Workspace**
 

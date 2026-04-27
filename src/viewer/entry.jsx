@@ -2722,7 +2722,7 @@ function App() {
                 : active.type === "code"
                   ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
                   : active.type === "table"
-                    ? <TableView key={active.name + ":table"} name={active.name} T={T} />
+                    ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile} />
                     : active.type === "pdf"
                       ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
                       : active.type === "csv"

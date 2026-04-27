@@ -617,8 +617,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         const rawSeg = tbm[1];
         const isRows  = rawSeg.endsWith("/rows");
         const isQuery = rawSeg.endsWith("/query");
+        const isView  = rawSeg.endsWith("/view");
         const rawName = isRows  ? rawSeg.slice(0, -5)
                       : isQuery ? rawSeg.slice(0, -6)
+                      : isView  ? rawSeg.slice(0, -5)
                       : rawSeg;
         const name = safeName(rawName);
         if (!name) return json(res, { error: "invalid name" }, 400);
@@ -714,6 +716,53 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           try {
             const result = await runQuery(fp, body.sql, tableDir);
             return json(res, result);
+          } catch (e) { return json(res, { error: e.message }, 400); }
+        }
+
+        // POST /api/table/:name/view — create or replace a named VIEW
+        // Body: { view_name: string, sql: string }
+        if (method === "POST" && isView) {
+          const body = await readBody(req);
+          if (!body?.view_name || !body?.sql) return json(res, { error: "expected {view_name, sql}" }, 400);
+          const safeView = String(body.view_name).replace(/"/g, '""');
+          try {
+            // Ensure the file exists with a meta table
+            await fs.mkdir(tableDir, { recursive: true });
+            await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+            await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', 'query')`);
+
+            // Create the view
+            await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS ${body.sql}`, tableDir);
+
+            // Detect workspace file references and augment if found
+            const { columns, rows } = await runQuery(fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir);
+            const [diagrams, notes, tldrawFiles, tables] = await Promise.all([
+              glob("**/*.excalidraw", { cwd: CWD, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
+              glob("**/*.md",         { cwd: CWD, ignore: ["node_modules/**"] }),
+              glob("**/*.tldraw",     { cwd: CWD, ignore: ["node_modules/**"] }),
+              glob("**/*.duckdb",     { cwd: CWD, ignore: ["node_modules/**"] }),
+            ]);
+            const wsNames = new Set([
+              ...diagrams.map(f => f.replace(/\.excalidraw$/, "")),
+              ...notes   .map(f => f.replace(/\.md$/, "")),
+              ...tldrawFiles.map(f => f.replace(/\.tldraw$/, "")),
+              ...tables  .map(f => f.replace(/\.duckdb$/, "")),
+            ]);
+            const normalise = v => String(v ?? "").replace(/^\.?\//, "").replace(/\.(excalidraw|md|tldraw|duckdb)$/i, "");
+            const refCols = columns.filter(col =>
+              rows.some(r => typeof r[col] === "string" && r[col] && wsNames.has(normalise(r[col])))
+            );
+            if (refCols.length > 0) {
+              const linkExprs = refCols.map(col => {
+                const sc = col.replace(/"/g, '""');
+                return `regexp_replace(regexp_replace("${sc}", '^\\./|^/', ''), '\\.(excalidraw|md|tldraw|duckdb)$', '') AS "${sc}_name"`;
+              });
+              await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS SELECT *, ${linkExprs.join(", ")} FROM (${body.sql})`, tableDir);
+            }
+
+            broadcast("table:changed", { name, op: "created" });
+            const sample = await runQuery(fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir);
+            return json(res, { ok: true, view_name: body.view_name, refCols, sample });
           } catch (e) { return json(res, { error: e.message }, 400); }
         }
 

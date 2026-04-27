@@ -509,6 +509,117 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
     }
   );
 
+  // ── DuckDB: create_view ──────────────────────────────────────────────────────
+  server.tool(
+    "create_view",
+    `Create a named DuckDB VIEW — a saved SQL query that re-computes dynamically on every read.
+Unlike tables, views store no data: each SELECT re-executes the SQL and returns fresh results.
+
+Typical uses:
+  • Wrap DuckDB file-scanning functions so results stay live:
+      sql:"SELECT file, size FROM glob('**/*.excalidraw') ORDER BY size DESC"
+  • Summarise or join existing tables:
+      sql:"SELECT status, count(*) AS n FROM jobs GROUP BY status"
+  • Read live CSVs/Parquets (paths relative to the .duckdb file):
+      sql:"SELECT * FROM read_csv('./exports/*.csv')"
+
+After creating the view, any column whose string values match workspace file names
+(diagrams, notes, canvases, or tables) automatically gets a companion _link column
+containing [[wikilinks]] so the browser renders them as clickable navigation links.`,
+    {
+      database:  z.string().describe("Name of the .duckdb file to create the view in (without extension)"),
+      view_name: z.string().describe("SQL name for the VIEW (no spaces; use underscores)"),
+      sql:       z.string().describe("SELECT statement defining the view — re-executed on every read"),
+    },
+    async ({ database, view_name, sql: viewSql }) => {
+      const fp = wsResolveFile(database, ".duckdb");
+      const tableDir = path.dirname(fp);
+      await fs.mkdir(tableDir, { recursive: true });
+
+      // Ensure the meta table exists (same as create_table)
+      await runExec(fp, `CREATE TABLE IF NOT EXISTS _ee_meta (key TEXT PRIMARY KEY, value TEXT)`);
+      await runExec(fp, `INSERT OR REPLACE INTO _ee_meta VALUES ('created_by', 'query')`);
+
+      // Create the base view
+      const safeView = view_name.replace(/"/g, '""');
+      await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS ${viewSql}`, tableDir);
+
+      // Sample the view to detect workspace file references
+      const { columns, rows } = await runQuery(fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir);
+
+      // Build a lookup set of all workspace file names (no extension, normalised)
+      const [diagrams, notes, tldrawFiles, tables] = await Promise.all([
+        glob("**/*.excalidraw", { cwd: ROOT, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
+        glob("**/*.md",         { cwd: ROOT, ignore: ["node_modules/**", "CLAUDE.md", ".claude/**"] }),
+        glob("**/*.tldraw",     { cwd: ROOT, ignore: ["node_modules/**"] }),
+        glob("**/*.duckdb",     { cwd: ROOT, ignore: ["node_modules/**"] }),
+      ]);
+      const wsFiles = new Map(); // basename-no-ext → { type, fullName }
+      for (const f of diagrams)    wsFiles.set(f.replace(/\.excalidraw$/, ""), { type: "diagram",  ext: ".excalidraw" });
+      for (const f of notes)       wsFiles.set(f.replace(/\.md$/, ""),         { type: "note",     ext: ".md"        });
+      for (const f of tldrawFiles) wsFiles.set(f.replace(/\.tldraw$/, ""),     { type: "tldraw",   ext: ".tldraw"    });
+      for (const f of tables)      wsFiles.set(f.replace(/\.duckdb$/, ""),     { type: "table",    ext: ".duckdb"    });
+
+      // For each string column, count how many sample values match workspace files
+      function normalise(val) {
+        // strip leading ./ or / and known extensions so we can look up by name
+        return String(val ?? "")
+          .replace(/^\.?\//, "")
+          .replace(/\.(excalidraw|md|tldraw|duckdb)$/i, "");
+      }
+      const refCols = columns.filter(col =>
+        rows.some(r => {
+          const v = r[col];
+          if (typeof v !== "string" || !v) return false;
+          return wsFiles.has(normalise(v));
+        })
+      );
+
+      // If any columns reference workspace files, add a companion _link column to the view
+      if (refCols.length > 0) {
+        // Build a CASE expression that maps each matching value to [[wikilink]]
+        // We use: '[[' || regexp_replace(col, '\\.(excalidraw|md|tldraw|duckdb)$', '') || ']]'
+        const linkExprs = refCols.map(col => {
+          const safeCol = col.replace(/"/g, '""');
+          return `regexp_replace(regexp_replace("${safeCol}", '^\\./|^/', ''), '\\.(excalidraw|md|tldraw|duckdb)$', '') AS "${safeCol}_name"`;
+        });
+        const wrappedSql = `SELECT *, ${linkExprs.join(", ")} FROM (${viewSql})`;
+        await runExec(fp, `CREATE OR REPLACE VIEW "${safeView}" AS ${wrappedSql}`, tableDir);
+      }
+
+      // Re-sample for the output markdown (uses updated view)
+      const { columns: finalCols, rows: finalRows, rowCount } = await runQuery(
+        fp, `SELECT * FROM "${safeView}" LIMIT 20`, tableDir
+      );
+
+      const annotate = (col, val) => {
+        const str = String(val ?? "");
+        const key = normalise(str);
+        if (wsFiles.has(key)) return `[[${key}]]`;
+        return str;
+      };
+
+      const header = `| ${finalCols.join(" | ")} |`;
+      const sep    = `| ${finalCols.map(() => "---").join(" | ")} |`;
+      const body   = finalRows.map(r =>
+        `| ${finalCols.map(c => annotate(c, r[c])).join(" | ")} |`
+      ).join("\n");
+
+      const note = refCols.length > 0
+        ? `\n\nFile-reference columns detected (${refCols.join(", ")}). ` +
+          `A companion *_name column was added; [[wikilinks]] are shown above. ` +
+          `In the browser, those cells render as clickable navigation links.`
+        : "";
+
+      return {
+        content: [{
+          type: "text",
+          text: `Created view "${view_name}" in ${database}.duckdb (${rowCount} rows)\n\n${header}\n${sep}\n${body}${note}`,
+        }],
+      };
+    }
+  );
+
   // ── list_workspace ───────────────────────────────────────────────────────────
   server.tool(
     "list_workspace",
@@ -559,6 +670,13 @@ Typical table workflow:
   2. write_rows   name:"jobs" table:"jobs" rows:[{company:"Acme", role:"Engineer", status:"applied", applied:"2026-04-01"}]
   3. read_table   name:"jobs"             — returns markdown preview
   4. query_table  name:"jobs" sql:"SELECT * FROM jobs WHERE status='interview'"
+
+Dynamic views (always up-to-date, no stored rows):
+  create_view  database:"workspace" view_name:"diagrams" sql:"SELECT file FROM glob('**/*.excalidraw') ORDER BY file"
+  create_view  database:"stats"     view_name:"summary"  sql:"SELECT status, count(*) AS n FROM jobs GROUP BY status"
+  Any column whose values match workspace file names automatically gets a companion _name column with [[wikilinks]].
+  The browser renders those cells as clickable navigation links.
+  Use list_workspace to discover file names before writing a view that references them.
 
 Other tools:
   - rename_file       — rename and update all [[wikilinks]]
