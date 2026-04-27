@@ -2,9 +2,14 @@ name: Release on merge to main
 
 # Runs whenever a PR is merged into main. Reads the version from package.json,
 # skips pre-release suffixes and already-tagged versions, then:
-#   1. Publishes to npm (provenance via trusted publisher)
+#   1. Publishes to npm via OIDC trusted publisher (no npm token needed)
 #   2. Creates and pushes a "v{version}" git tag
 #   3. Creates a GitHub Release with changelog notes
+#
+# Authentication: uses the npmjs.com trusted publisher OIDC flow.
+# setup-node writes .npmrc (needed) but also injects NODE_AUTH_TOKEN=github.token.
+# We clear NODE_AUTH_TOKEN in the publish step so npm falls through to the
+# OIDC trusted-publisher exchange instead of using the GitHub token.
 #
 # All three steps happen in one job so we don't need a cross-workflow trigger
 # (GITHUB_TOKEN cannot trigger other workflows).
@@ -14,7 +19,7 @@ on:
     branches: [main]
 
 permissions:
-  id-token: write   # needed for --provenance
+  id-token: write   # needed for OIDC trusted publisher + --provenance
   contents: write   # push tag + create GitHub Release
 
 jobs:
@@ -65,6 +70,12 @@ jobs:
       - name: Publish to npm
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm publish --access public --provenance
+        env:
+          # setup-node exports NODE_AUTH_TOKEN=github.token to GITHUB_ENV.
+          # That GitHub token is not a valid npm token — npm returns 404.
+          # Clear it here so npm sees an empty _authToken in .npmrc and
+          # falls through to the OIDC trusted-publisher exchange instead.
+          NODE_AUTH_TOKEN: ''
 
       - name: Create and push git tag
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')

@@ -5,17 +5,32 @@ This file is for contributors working on the package itself, not for users of th
 
 ## Git / PR Workflow Rules
 
-**Always check PR and branch state before pushing.**
+### Rule 1 — Never push to a merged/closed branch
 
-Before pushing to any branch, run:
+Before ANY push, verify the branch's PR is still open:
 ```sh
-gh pr list --state all | grep <branch-name>
+gh pr list --repo 1vav/embedded-editor-for-claude-code --state all | grep <branch-name>
 ```
-If the PR is already MERGED or CLOSED, **do not push to that branch**. Create a fresh branch from `main` instead:
+If status is MERGED or CLOSED → **stop**. Create a new branch from `main`:
 ```sh
-git checkout -b fix/your-fix-name origin/main
+git checkout -b fix/descriptive-name origin/main
 ```
-Pushing to a merged branch creates orphaned commits that never reach main.
+GitHub squash-merges orphan any new commits on the old branch. They never reach main.
+
+**Rule: one branch = one PR = done. Never reuse after merge.**
+
+### Rule 2 — Always rebase, never stash-pop onto a new branch
+
+When switching to a fresh branch to carry forward a change:
+1. `git checkout -b fix/new-name origin/main`
+2. Make the edit directly (Read → Edit/Write tools)
+3. Commit and push
+
+**Never** `git stash && checkout new-branch && git stash pop`. Stash-pops create merge conflicts when the stash was built against a different base. Write the change fresh instead.
+
+### Rule 3 — Keep PRs to a single focused file change
+
+When the same file is being iteratively fixed across multiple PRs, conflicts accumulate. If a fix attempt fails, understand the root cause completely before opening the next PR — don't make incremental guesses.
 
 ## Architecture
 
