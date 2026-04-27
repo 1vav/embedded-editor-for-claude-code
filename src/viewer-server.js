@@ -31,7 +31,7 @@ import { glob }          from "glob";
 import { fileURLToPath } from "url";
 import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
-import { ROOT, validateName, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
+import { ROOT, validateName, rewriteLinks, removeLinks, findBacklinks, listSnapshots } from "./workspace.js";
 import { runQuery, runExec, queryCsv, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
 
 const PACKAGE_VERSION = JSON.parse(
@@ -530,8 +530,12 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           return json(res, { ok: true });
         }
         if (method === "DELETE") {
-          try { await fs.unlink(fp); broadcast("diagram:deleted", { name, op: "deleted" }); return json(res, { ok: true }); }
-          catch { return json(res, { error: "not found" }, 404); }
+          try {
+            await fs.unlink(fp);
+            broadcast("diagram:deleted", { name, op: "deleted" });
+            removeLinks(name, "excalidraw").catch(() => {});
+            return json(res, { ok: true });
+          } catch { return json(res, { error: "not found" }, 404); }
         }
         res.writeHead(405); return res.end();
       }
@@ -566,8 +570,12 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           return json(res, { ok: true });
         }
         if (method === "DELETE") {
-          try { await fs.unlink(fp); broadcast("tldraw:deleted", { name, op: "deleted" }); return json(res, { ok: true }); }
-          catch { return json(res, { error: "not found" }, 404); }
+          try {
+            await fs.unlink(fp);
+            broadcast("tldraw:deleted", { name, op: "deleted" });
+            removeLinks(name, "tldraw").catch(() => {});
+            return json(res, { ok: true });
+          } catch { return json(res, { error: "not found" }, 404); }
         }
         res.writeHead(405); return res.end();
       }
@@ -694,6 +702,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
             duckCloseOne(fp);  // evict from pool before unlinking
             await fs.unlink(fp);
             broadcast("table:deleted", { name, op: "deleted" });
+            removeLinks(name, "duckdb").catch(() => {});
             return json(res, { ok: true });
           } catch { return json(res, { error: "not found" }, 404); }
         }

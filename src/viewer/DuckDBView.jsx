@@ -556,7 +556,34 @@ function CardDataView({ result, T, onCellBlur, onAddRow, groupBy }) {
 
 // ── TableEmbed — inline in notes for ![[name.duckdb]]
 
-export function TableEmbed({ name, T, onOpen }) {
+function TableEmbedDeleteBtn({ name, T, onDelete }) {
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) {
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 3 }}>
+        <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted }}>Delete?</span>
+        <span onClick={() => onDelete(name, "duckdb")}
+          style={{ fontFamily: T.mono, fontSize: 10, color: "#f87171", cursor: "pointer",
+            border: "1px solid #f8717155", borderRadius: 3, padding: "1px 6px" }}>yes</span>
+        <span onClick={() => setConfirm(false)}
+          style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, cursor: "pointer",
+            border: `1px solid ${T.border2}`, borderRadius: 3, padding: "1px 6px" }}>cancel</span>
+      </span>
+    );
+  }
+  return (
+    <span onClick={() => setConfirm(true)} title={`Delete ${name}.duckdb`}
+      style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, cursor: "pointer",
+        border: `1px solid ${T.border2}`, borderRadius: 3, padding: "2px 7px", marginLeft: 3,
+        opacity: 0.7, transition: "opacity .1s" }}
+      onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#f87171"; }}
+      onMouseLeave={e => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.color = T.muted; }}>
+      ⊗
+    </span>
+  );
+}
+
+export function TableEmbed({ name, T, onOpen, onDelete }) {
   const [view,    setView]    = useState(() => localStorage.getItem(`ee-embed-view-${name}`) ?? "table");
   const [result,  setResult]  = useState({ columns: [], rows: [], rowCount: 0 });
   const [loading, setLoading] = useState(true);
@@ -612,6 +639,7 @@ export function TableEmbed({ name, T, onOpen }) {
           fontSize: 10, color: T.muted, border: `1px solid ${T.border2}`, padding: "2px 7px",
           borderRadius: 4, cursor: "pointer", fontFamily: T.mono, marginLeft: 3,
         }}>Open ↗</span>
+        {onDelete && <TableEmbedDeleteBtn name={name} T={T} onDelete={onDelete} />}
       </div>
       {loading && <div style={{ padding: "10px 12px", color: T.muted, fontFamily: T.mono, fontSize: 11 }}>Loading…</div>}
       {!loading && view === "table" && columns.length > 0 && (

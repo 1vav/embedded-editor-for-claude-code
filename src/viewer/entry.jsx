@@ -1431,39 +1431,77 @@ function TldrawEditor({ name, onUserSave }) {
 
 // ─── Note View ────────────────────────────────────────────────────────────────
 
-function DiagramEmbed({ name, onOpen }) {
+function EmbedDeleteBtn({ name, type, onDelete }) {
+  const T = useT();
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) {
+    return (
+      <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}
+        onClick={e => e.stopPropagation()}>
+        <span style={{ fontFamily: T.mono, fontSize: 10, color: T.muted }}>Delete?</span>
+        <span onClick={() => { onDelete(name, type); }}
+          style={{ fontFamily: T.mono, fontSize: 10, color: "#f87171", cursor: "pointer",
+            border: "1px solid #f8717155", borderRadius: 3, padding: "1px 6px" }}>yes</span>
+        <span onClick={() => setConfirm(false)}
+          style={{ fontFamily: T.mono, fontSize: 10, color: T.muted, cursor: "pointer",
+            border: `1px solid ${T.border2}`, borderRadius: 3, padding: "1px 6px" }}>cancel</span>
+      </span>
+    );
+  }
+  return (
+    <span onClick={e => { e.stopPropagation(); setConfirm(true); }}
+      title={`Delete ${name}`}
+      style={{ marginLeft: "auto", fontFamily: T.mono, fontSize: 10, color: T.muted,
+        cursor: "pointer", border: `1px solid ${T.border2}`, borderRadius: 3, padding: "1px 6px",
+        opacity: 0.7, transition: "opacity .1s" }}
+      onMouseEnter={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.color = "#f87171"; }}
+      onMouseLeave={e => { e.currentTarget.style.opacity = "0.7"; e.currentTarget.style.color = T.muted; }}>
+      ⊗
+    </span>
+  );
+}
+
+function DiagramEmbed({ name, onOpen, onDelete }) {
   const T = useT();
   const [h, sH] = useState(false);
   return (
-    <div onClick={() => onOpen(name, "diagram")}
-      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
-      style={{ margin: "16px 0", cursor: "pointer", borderRadius: 8, overflow: "hidden",
+    <div onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{ margin: "16px 0", borderRadius: 8, overflow: "hidden",
         border: `1px solid ${h ? T.accent : T.border2}`, transition: "border-color .15s" }}>
-      <img src={api.pngUrl(name)} alt={name} style={{ width: "100%", display: "block" }} />
+      <div onClick={() => onOpen(name, "diagram")} style={{ cursor: "pointer" }}>
+        <img src={api.pngUrl(name)} alt={name} style={{ width: "100%", display: "block" }} />
+      </div>
       <div style={{ padding: "6px 10px", background: T.surface2, fontFamily: T.mono,
         fontSize: 10, color: T.muted, display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: T.accent }}>⬡</span> {name}
-        <span style={{ marginLeft: "auto", color: T.blue }}>open →</span>
+        {onDelete
+          ? <EmbedDeleteBtn name={name} type="diagram" onDelete={onDelete} />
+          : <span onClick={() => onOpen(name, "diagram")}
+              style={{ marginLeft: "auto", color: T.blue, cursor: "pointer" }}>open →</span>}
       </div>
     </div>
   );
 }
 
-function TldrawEmbed({ name, onOpen }) {
+function TldrawEmbed({ name, onOpen, onDelete }) {
   const T = useT();
   const [h, sH] = useState(false);
   return (
-    <div onClick={() => onOpen(name, "tldraw")}
-      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
-      style={{ margin: "16px 0", cursor: "pointer", borderRadius: 8, overflow: "hidden",
+    <div onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{ margin: "16px 0", borderRadius: 8, overflow: "hidden",
         border: `1px solid ${h ? T.tldraw : T.border2}`, transition: "border-color .15s" }}>
-      <div style={{ height: 80, background: T.surface2, display: "flex", alignItems: "center",
-        justifyContent: "center", color: T.tldraw, fontSize: 28 }}>◈</div>
+      <div onClick={() => onOpen(name, "tldraw")} style={{ cursor: "pointer" }}>
+        <div style={{ height: 80, background: T.surface2, display: "flex", alignItems: "center",
+          justifyContent: "center", color: T.tldraw, fontSize: 28 }}>◈</div>
+      </div>
       <div style={{ padding: "6px 10px", background: T.surface2, fontFamily: T.mono,
         fontSize: 10, color: T.muted, display: "flex", alignItems: "center", gap: 6,
         borderTop: `1px solid ${T.border}` }}>
         <span style={{ color: T.tldraw }}>◈</span> {name}
-        <span style={{ marginLeft: "auto", color: T.blue }}>open →</span>
+        {onDelete
+          ? <EmbedDeleteBtn name={name} type="tldraw" onDelete={onDelete} />
+          : <span onClick={() => onOpen(name, "tldraw")}
+              style={{ marginLeft: "auto", color: T.blue, cursor: "pointer" }}>open →</span>}
       </div>
     </div>
   );
@@ -1695,6 +1733,28 @@ function NoteView({ name, onNavigate, onUserSave }) {
     onUserSave?.(name, "note");
   }, [name, onUserSave]);
 
+  // Called when the user deletes an embedded file from preview mode.
+  // Deletes the file (server also strips all ![[]] references from every .md),
+  // then reloads the current note content so the embed disappears here too.
+  const handleEmbedDelete = useCallback(async (embedName, embedType) => {
+    try {
+      if (embedType === "diagram") await api.delDiag(embedName);
+      else if (embedType === "tldraw") await api.delTldraw(embedName);
+      else if (embedType === "duckdb") await api.delTable(embedName);
+    } catch {}
+    // Reload this note — server's removeLinks updated it on disk
+    try {
+      const updated = await api.getNote(name);
+      setRaw(updated);
+      if (cmViewRef.current) {
+        const cur = cmViewRef.current.state.doc.toString();
+        if (cur !== updated) cmViewRef.current.dispatch({
+          changes: { from: 0, to: cur.length, insert: updated },
+        });
+      }
+    } catch {}
+  }, [name]);
+
   const debouncedSave = useDebounced(doSave, 800);
   const debouncedSaveRef = useRef(debouncedSave);
   useEffect(() => { debouncedSaveRef.current = debouncedSave; }, [debouncedSave]);
@@ -1917,9 +1977,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
               <style>{noteStyles}</style>
               <FrontmatterPanel fm={noteFm} T={N} />
               {segs.map((seg) =>
-                seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} />
-                : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} />
-                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} />
+                seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
+                : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
+                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} onDelete={handleEmbedDelete} />
                 : <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text) }} />
               )}
             </div>
