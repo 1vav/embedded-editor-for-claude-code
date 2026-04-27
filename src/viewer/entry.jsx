@@ -137,7 +137,7 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     // Drag-to-reorder handles
     ".ee-drag-handle":         { display: "inline-block", width: "0", height: "0", overflow: "visible" },
     ".ee-drag-handle-btn":     { position: "absolute", left: "-40px", top: "50%", transform: "translateY(-50%)", width: "24px", height: "1.4em", display: "flex", alignItems: "center", justifyContent: "center", cursor: "grab", color: "transparent", userSelect: "none", fontSize: "14px", borderRadius: "4px", transition: "color 0.1s, background 0.08s" },
-    ".cm-line:hover .ee-drag-handle-btn": { color: N.muted },
+    ".cm-line:hover .ee-drag-handle-btn, .cm-line.ee-handle-hover .ee-drag-handle-btn": { color: N.muted },
     ".ee-drag-handle-btn.ee-active": { color: N.accent, cursor: "grabbing" },
     ".ee-drag-line":            { position: "absolute", left: "20px", right: "20px", height: "2px", background: N.accent, pointerEvents: "none", display: "none", zIndex: "10", borderRadius: "1px" },
   }, { dark: N.isDark });

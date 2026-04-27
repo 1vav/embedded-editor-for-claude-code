@@ -95,6 +95,16 @@ class DragHandleWidget extends WidgetType {
       e.stopPropagation();
       startDrag(view, this.groupIdx, this.blockIdx, e);
     });
+    // Keep handle visible while mouse moves from text leftward to the handle.
+    // The handle sits at left:-40px, outside .cm-line's layout box, so CSS
+    // :hover on .cm-line stops firing the moment the cursor leaves the line —
+    // hiding the handle before the user can click it. We fix this with JS.
+    btn.addEventListener("mouseenter", () => {
+      btn.closest(".cm-line")?.classList.add("ee-handle-hover");
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (!activeDrag) btn.closest(".cm-line")?.classList.remove("ee-handle-hover");
+    });
 
     // Outer wrapper: zero width, overflow visible so the btn floats left
     const outer = document.createElement("span");
@@ -138,7 +148,11 @@ function cancelDrag() {
   if (!activeDrag) return;
   const { lineEl, handleBtn } = activeDrag;
   lineEl.remove();
-  if (handleBtn) handleBtn.classList.remove("ee-active");
+  if (handleBtn) {
+    handleBtn.classList.remove("ee-active");
+    // Also clear the JS-driven hover class now that dragging is done
+    handleBtn.closest(".cm-line")?.classList.remove("ee-handle-hover");
+  }
   document.removeEventListener("mousemove", onDragMove,    { capture: true });
   document.removeEventListener("mouseup",   onDragEnd,     { capture: true });
   document.removeEventListener("keydown",   onDragKeyDown, { capture: true });
