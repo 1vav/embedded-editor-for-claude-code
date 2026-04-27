@@ -14,10 +14,14 @@ name: Release on merge to main
 # `ref:refs/heads/main` which does not match the trusted publisher config.
 #
 # Flow:
-#   1. github-script gets OIDC JWT (audience=npm:publish, sub includes environment)
-#   2. JWT is set as NODE_AUTH_TOKEN (last GITHUB_ENV write wins over github.token)
-#   3. npm publish sends Authorization: Bearer <jwt> to the registry
-#   4. Registry validates JWT against trusted publisher config → publish allowed
+#   1. github-script requests OIDC JWT with audience "npm:registry.npmjs.org"
+#      (this specific audience is what npmjs trusted publisher requires)
+#   2. JWT is exchanged at POST /-/npm/v1/oidc/token/exchange/package/{name}
+#      → registry validates JWT claims against trusted publisher config
+#      → returns a short-lived npm token
+#   3. Short-lived token is written to NODE_AUTH_TOKEN (last GITHUB_ENV write
+#      wins over setup-node's github.token injection)
+#   4. npm publish uses NODE_AUTH_TOKEN as a standard npm token
 #
 # All three steps happen in one job so we don't need a cross-workflow trigger
 # (GITHUB_TOKEN cannot trigger other workflows).
@@ -79,18 +83,33 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm run build
 
-      - name: Set NODE_AUTH_TOKEN to GitHub OIDC JWT
+      - name: Exchange OIDC JWT for short-lived npm token
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         uses: actions/github-script@v7
         with:
           script: |
-            // With environment: release on the job, the JWT sub will be
-            // "repo:1vav/embedded-editor-for-claude-code:environment:release"
-            // which matches the trusted publisher config on npmjs.com.
-            const oidcToken = await core.getIDToken('npm:publish')
+            // npm trusted publisher requires audience "npm:registry.npmjs.org" (not "npm:publish").
+            // The JWT must then be exchanged at the registry's OIDC endpoint for a
+            // short-lived npm token — the registry does not accept the raw JWT as
+            // a bearer token directly.
+            const oidcToken = await core.getIDToken('npm:registry.npmjs.org')
             core.setSecret(oidcToken)
-            // Overwrite NODE_AUTH_TOKEN — last GITHUB_ENV write wins.
-            core.exportVariable('NODE_AUTH_TOKEN', oidcToken)
+
+            const resp = await fetch(
+              'https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/embedded-editor-for-claude-code',
+              {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${oidcToken}` },
+              }
+            )
+            if (!resp.ok) {
+              const body = await resp.text()
+              throw new Error(`OIDC token exchange failed: HTTP ${resp.status} — ${body}`)
+            }
+            const { token } = await resp.json()
+            core.setSecret(token)
+            // Overwrite NODE_AUTH_TOKEN — last GITHUB_ENV write wins over setup-node's injection.
+            core.exportVariable('NODE_AUTH_TOKEN', token)
 
       - name: Publish to npm
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
