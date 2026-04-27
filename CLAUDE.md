@@ -155,6 +155,35 @@ curl -s --compressed http://127.0.0.1:3000/vendor/viewer.js | grep -c "your-new-
 
 Revert the version suffix before releasing.
 
+## npm Publish — OIDC Trusted Publisher
+
+Releases are fully automated via `.github/workflows/release-on-merge.yml`. **Never run `npm publish` locally.**
+
+The pipeline uses npmjs.com Trusted Publisher (OIDC) — no `NPM_TOKEN` secret is stored anywhere.
+
+### How it works
+
+1. The job declares `environment: release`, which makes the GitHub JWT `sub` claim include `environment:release` — required to match the trusted publisher config on npmjs.com.
+2. `actions/github-script` requests a JWT with audience **`npm:registry.npmjs.org`** (not `npm:publish` — that's wrong and silently breaks everything).
+3. The JWT is exchanged at `POST https://registry.npmjs.org/-/npm/v1/oidc/token/exchange/package/embedded-editor-for-claude-code` (empty body, JWT as `Authorization: Bearer`) → returns a short-lived npm token.
+4. That token is written to `NODE_AUTH_TOKEN`, overwriting what `setup-node` injected.
+5. `npm publish --access public --provenance` runs normally.
+
+### Hard-won lessons — do not repeat
+
+| Mistake | Symptom | Why wrong |
+|---------|---------|-----------|
+| Audience `npm:publish` | `ENEEDAUTH` or `E404` from registry | Registry requires `npm:registry.npmjs.org` |
+| Passing the raw JWT as `NODE_AUTH_TOKEN` | `E404: not in this registry` or HTTP 401 | Registry doesn't accept OIDC JWT as bearer; must exchange first |
+| Missing `environment: release` on the job | Token exchange 403 | JWT `sub` won't match trusted publisher config |
+| `npm install -g npm@latest` in CI | `MODULE_NOT_FOUND: promise-retry` | Self-upgrade breaks npm; never upgrade npm in CI |
+| Deleting `.npmrc` | `ENEEDAUTH` immediately | `.npmrc` provides the `_authToken` wiring; removing it breaks auth entirely |
+
+### To trigger a release
+
+1. Bump `version` in `package.json` (no `-` suffix — pre-release versions are skipped).
+2. Merge to `main`. The workflow fires automatically.
+
 ## Testing
 
 ```sh
