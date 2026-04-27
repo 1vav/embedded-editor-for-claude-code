@@ -1,0 +1,54 @@
+name: Release on merge to main
+
+# Runs whenever a PR is merged into main. Reads the version from package.json and
+# creates a "v{version}" tag if it doesn't already exist. Pushing the tag then
+# triggers the publish.yml workflow which publishes to npm and creates a GitHub Release.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write  # needed to push the tag
+
+jobs:
+  tag-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full history to check existing tags
+
+      - name: Read version from package.json
+        id: pkg
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          TAG="v${{ steps.pkg.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Skip pre-release versions on main
+        if: contains(steps.pkg.outputs.version, '-')
+        run: |
+          echo "Version ${{ steps.pkg.outputs.version }} contains a pre-release suffix — skipping tag."
+          exit 0
+
+      - name: Create and push tag
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.tag_check.outputs.tag }}"
+          git push origin "${{ steps.tag_check.outputs.tag }}"
+          echo "Created and pushed tag ${{ steps.tag_check.outputs.tag }}"
+
+      - name: Already tagged — nothing to do
+        if: steps.tag_check.outputs.exists == 'true'
+        run: echo "Tag ${{ steps.tag_check.outputs.tag }} already exists — skipping."

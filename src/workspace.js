@@ -95,6 +95,46 @@ export async function rewriteLinks(oldName, newName) {
   return updated;
 }
 
+// ── Link removal ─────────────────────────────────────────────────────────────
+// Called when a file is deleted to clean up all references to it in .md files.
+// Removes embed markers (![[name.ext]]) entirely (whole line when alone on it),
+// and converts wikilinks ([[name]] / [[name.ext]]) to their display text.
+// Returns the number of .md files updated.
+
+export async function removeLinks(name, ext) {
+  const mdFiles = await glob("**/*.md", { cwd: ROOT, ignore: ["node_modules/**"] });
+  let updated = 0;
+  const en = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ee = ext  ? ext.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
+  const extPart = ee ? `(?:\\.${ee})?` : "";
+
+  // Pattern 1: embed marker on its own line → remove the whole line.
+  const embedLineRe = new RegExp(
+    `^[ \\t]*!\\[\\[${en}${extPart}\\]\\][ \\t]*(?:\\r?\\n|$)`, "gim"
+  );
+  // Pattern 2: embed marker inline (not alone on line) → replace with "".
+  const embedInlineRe = new RegExp(`!\\[\\[${en}${extPart}\\]\\]`, "gi");
+  // Pattern 3: wikilink [[name|alias]] or [[name.ext|alias]] → alias.
+  // Pattern 4: wikilink [[name]] or [[name.ext]] → name.
+  const wikiAliasRe = new RegExp(`\\[\\[${en}${extPart}\\|([^\\]]+)\\]\\]`, "gi");
+  const wikiPlainRe = new RegExp(`\\[\\[${en}${extPart}\\]\\]`, "gi");
+
+  await Promise.all(mdFiles.map(async f => {
+    const fp = path.join(ROOT, f);
+    try {
+      const text = await fs.readFile(fp, "utf8");
+      const r1 = text.replace(embedLineRe, "");
+      const r2 = r1.replace(embedInlineRe, "");
+      const r3 = r2.replace(wikiAliasRe, (_, alias) => alias);
+      const r4 = r3.replace(wikiPlainRe, name);
+      if (r4 !== text) { await fs.writeFile(fp, r4, "utf8"); updated++; }
+    } catch (e) {
+      process.stderr.write(`[embedded-editor] removeLinks error ${fp}: ${e.message}\n`);
+    }
+  }));
+  return updated;
+}
+
 // ── Backlinks ─────────────────────────────────────────────────────────────────
 
 export async function findBacklinks(name) {
