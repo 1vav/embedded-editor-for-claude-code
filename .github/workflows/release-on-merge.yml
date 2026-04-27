@@ -6,15 +6,6 @@ name: Release on merge to main
 #   2. Creates and pushes a "v{version}" git tag
 #   3. Creates a GitHub Release with changelog notes
 #
-# Authentication: npmjs.com trusted publisher OIDC flow.
-#
-# Node 22 ships with npm 10.9.x which added OIDC trusted-publisher auto-exchange.
-# registry-url is intentionally OMITTED from setup-node: setting it injects
-# NODE_AUTH_TOKEN=github.token which blocks OIDC (registry returns 404 for
-# invalid tokens). Without registry-url, npm detects ACTIONS_ID_TOKEN_REQUEST_URL
-# in the environment, fetches an OIDC token, exchanges it with the registry,
-# and publishes — no explicit token management needed.
-#
 # All three steps happen in one job so we don't need a cross-workflow trigger
 # (GITHUB_TOKEN cannot trigger other workflows).
 
@@ -61,12 +52,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          # registry-url intentionally omitted — it injects NODE_AUTH_TOKEN=github.token
-          # which causes registry 404. npm 10.9+ auto-exchanges OIDC when no token is set.
-
-      - name: Show npm version (for debugging)
-        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
-        run: npm --version
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
@@ -76,11 +62,42 @@ jobs:
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
         run: npm run build
 
+      - name: Diagnose OIDC + registry auth
+        if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // 1. Get OIDC JWT
+            const oidcToken = await core.getIDToken('npm:publish')
+            core.setSecret(oidcToken)
+
+            // 2. Decode claims (safe — payload is public, only sig is secret)
+            const payload = JSON.parse(Buffer.from(oidcToken.split('.')[1], 'base64url').toString())
+            console.log('JWT claims:', JSON.stringify({
+              iss: payload.iss,
+              aud: payload.aud,
+              sub: payload.sub,
+              repository: payload.repository,
+              workflow: payload.workflow,
+              job_workflow_ref: payload.job_workflow_ref,
+              ref: payload.ref,
+            }, null, 2))
+
+            // 3. Test if JWT is accepted by registry as bearer auth
+            const whoami = await fetch('https://registry.npmjs.org/-/whoami', {
+              headers: { Authorization: `Bearer ${oidcToken}` }
+            })
+            console.log(`/-/whoami with OIDC JWT: HTTP ${whoami.status}`)
+            console.log('Response:', await whoami.text())
+
+            // 4. Set NODE_AUTH_TOKEN to OIDC JWT for the publish step
+            core.exportVariable('NODE_AUTH_TOKEN', oidcToken)
+
       - name: Publish to npm
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
-        run: npm publish --access public --provenance --loglevel verbose
-        # npm 10.9+ detects ACTIONS_ID_TOKEN_REQUEST_URL, auto-exchanges the OIDC
-        # token with the npmjs trusted publisher endpoint, and publishes.
+        run: |
+          echo "NODE_AUTH_TOKEN starts with: ${NODE_AUTH_TOKEN:0:10}..."
+          npm publish --access public --provenance
 
       - name: Create and push git tag
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
