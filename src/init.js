@@ -176,6 +176,18 @@ Run \`npx embedded-editor serve\` → open http://127.0.0.1:${DEFAULT_PORT}
 - \`[[wikilinks]]\` in any file navigate between files
 - \`![[diagram.excalidraw]]\` in Markdown embeds a diagram inline
 - Live sync: Claude's edits appear instantly without reload
+
+### Writing notes — visual style
+
+**Always use \`[[Name]]\` for wikilinks — never write \`<a data-wl>\` HTML tags.** The viewer converts \`[[Name]]\` automatically; raw HTML tags show as literal text.
+
+Write notes like real reports, not bullet dumps:
+
+- **Embed diagrams** you create: \`![[diagram-name]]\` renders the PNG inline.
+- **Use Markdown tables** for any structured data (comparisons, specs, lists with attributes) instead of bullet lists.
+- **Add images** when relevant: \`![description](url)\` for remote images. To save locally, write the image bytes to \`{name}-assets/image.png\` using the \`Write\` tool, then reference as \`![description]({name}-assets/image.png)\`.
+- **Structure with headings** (##, ###) and short prose paragraphs, not nested bullets.
+- **Cross-link** related notes and diagrams with \`[[name]]\` — readers can navigate the workspace like a wiki.
 `;
 }
 
