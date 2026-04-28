@@ -306,7 +306,8 @@ const frontmatterPlugin = ViewPlugin.fromClass(class {
 
 // ─── Markdown ─────────────────────────────────────────────────────────────────
 
-const md = new MarkdownIt({ html: false, linkify: true, typographer: true });
+// html:true so pre-processed wikilink <a> tags pass through; DOMPurify sanitises the output.
+const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 
 // Per-file scroll position cache — persists across tab switches and diagram opens
 const noteScrollCache = new Map();
@@ -370,7 +371,14 @@ function parseSegments(raw) {
 
 // Convert [[name|label]] and [[name]] to annotated <a> tags, then run markdown-it.
 // Skips replacements inside inline code spans or fenced code blocks.
+// Also normalises raw <a data-wl> HTML that Claude sometimes writes directly — markdown-it
+// has html:false so those would otherwise be escaped to visible text.
 function renderMd(text) {
+  text = text.replace(/<a\s+data-wl="([^"]*)"[^>]*>([^<]*)<\/a>/g, (_, name, label) => {
+    const n = name.replace(/&quot;/g, '"').trim();
+    const l = label.trim();
+    return l && l !== n ? `[[${n}|${l}]]` : `[[${n}]]`;
+  });
   const codeRanges = [];
   const fenceRe = /^(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1[ \t]*$/gm;
   for (const fm of text.matchAll(fenceRe)) codeRanges.push([fm.index, fm.index + fm[0].length]);
@@ -1471,6 +1479,43 @@ function TldrawEditor({ name, onUserSave }) {
 
 // ─── Note View ────────────────────────────────────────────────────────────────
 
+function CtxMenu({ menu, T, onClose, onToast }) {
+  const copy = (text, label) => {
+    const done = () => { onToast(label + " copied"); setTimeout(() => onToast(""), 1800); onClose(); };
+    const fail = () => { onToast("copy unavailable"); setTimeout(() => onToast(""), 1800); onClose(); };
+    try {
+      const ta = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;top:0;left:0;opacity:0;pointer-events:none" });
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) { done(); return; }
+    } catch {}
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(fail);
+    else fail();
+  };
+  const btnStyle = { display: "block", width: "100%", background: "none", border: "none",
+    color: T.text, padding: "6px 14px", cursor: "pointer", textAlign: "left",
+    fontFamily: T.mono, fontSize: 12 };
+  const left = Math.min(menu.x, window.innerWidth - 190);
+  const top  = Math.min(menu.y, window.innerHeight - 110);
+  return (
+    <div onMouseDown={e => e.stopPropagation()} style={{
+      position: "fixed", left, top, zIndex: 9999, background: T.surface,
+      border: `1px solid ${T.border2}`, borderRadius: 7,
+      boxShadow: "0 4px 16px rgba(0,0,0,.18)", padding: "4px 0", minWidth: 180,
+    }}>
+      {menu.linkText && (
+        <button style={btnStyle} onClick={() => copy(menu.linkText, "link")}>Copy link</button>
+      )}
+      {menu.sel && (
+        <button style={btnStyle} onClick={() => copy(menu.sel, "selection")}>Copy selection</button>
+      )}
+      {(menu.linkText || menu.sel) && <div style={{ borderTop: `1px solid ${T.border}`, margin: "4px 0" }} />}
+      <button style={{ ...btnStyle, color: T.muted }} onClick={() => copy(menu.raw, "markdown")}>Copy note as Markdown</button>
+    </div>
+  );
+}
+
 function EmbedDeleteBtn({ name, type, onDelete }) {
   const T = useT();
   const [confirm, setConfirm] = useState(false);
@@ -1734,6 +1779,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const [styleId,   setStyleId]   = useState(() => localStorage.getItem("ee-note-style") ?? "serif");
   const [colorId,   setColorId]   = useState(() => localStorage.getItem("ee-note-color") ?? "auto");
   const [linkToast, setLinkToast] = useState("");
+  const [ctxMenu,   setCtxMenu]   = useState(null); // { x, y, sel, raw }
   const S = NOTE_STYLES.find(s => s.id === styleId) ?? NOTE_STYLES[0];
   const CP = NOTE_COLOR_PROFILES.find(p => p.id === colorId) ?? NOTE_COLOR_PROFILES[0];
   const C = CP.colors;
@@ -1954,6 +2000,25 @@ function NoteView({ name, onNavigate, onUserSave }) {
     if (wl) { e.preventDefault(); onNavigate(wl.dataset.wl, "auto"); }
   }, [onNavigate]);
 
+  const handleContextMenu = useCallback((e) => {
+    e.preventDefault();
+    const sel = window.getSelection()?.toString() ?? "";
+    const link = e.target.closest("a[data-wl], a[data-external], a[href]");
+    const linkText = link ? (link.dataset.wl || link.dataset.external || link.href || "") : "";
+    setCtxMenu({ x: e.clientX, y: e.clientY, sel, raw, linkText });
+  }, [raw]);
+
+  // Dismiss context menu on outside click or Escape
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const dismiss = () => setCtxMenu(null);
+    const key = (e) => { if (e.key === "Escape") setCtxMenu(null); };
+    document.addEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("mousedown", dismiss); document.removeEventListener("keydown", key); };
+  }, [ctxMenu]);
+
+
   const handleDropChoice = useCallback(async (choice) => {
     if (!dropPopup || !cmViewRef.current) return;
     const { file, pos } = dropPopup;
@@ -2035,7 +2100,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
             visibility: mode === "preview" ? "visible" : "hidden",
             pointerEvents: mode === "preview" ? "auto" : "none",
           }}>
-            <div onClick={handleClick} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
+            <div onClick={handleClick} onContextMenu={handleContextMenu} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
               <FrontmatterPanel fm={noteFm} T={N} />
               {segs.map((seg) =>
@@ -2096,6 +2161,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
             cancel
           </button>
         </div>,
+        document.body
+      )}
+
+      {ctxMenu && createPortal(
+        <CtxMenu menu={ctxMenu} T={T} onClose={() => setCtxMenu(null)} onToast={setLinkToast} />,
         document.body
       )}
 
