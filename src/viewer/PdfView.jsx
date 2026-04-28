@@ -1,7 +1,25 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 
 export function PdfView({ name, T }) {
   const src = `/api/pdf/${encodeURIComponent(name)}`;
+  const [blobUrl, setBlobUrl] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let url;
+    fetch(src)
+      .then(r => {
+        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+        return r.blob();
+      })
+      .then(blob => {
+        url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+      })
+      .catch(e => setError(e.message));
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [src]);
+
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: T.bg }}>
       {/* Toolbar */}
@@ -25,12 +43,26 @@ export function PdfView({ name, T }) {
           ↓ Download
         </a>
       </div>
-      {/* PDF iframe — browser native renderer */}
-      <iframe
-        src={src}
-        title={name}
-        style={{ flex: 1, border: "none", background: "#fff" }}
-      />
+      {/* PDF viewer — blob URL avoids Chrome iframe black-screen issue */}
+      {error ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: T.mono, fontSize: 12, color: T.muted }}>
+          Failed to load PDF: {error}
+        </div>
+      ) : blobUrl ? (
+        <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+          <embed
+            src={blobUrl}
+            type="application/pdf"
+            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }}
+          />
+        </div>
+      ) : (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+          fontFamily: T.mono, fontSize: 12, color: T.muted }}>
+          Loading…
+        </div>
+      )}
     </div>
   );
 }

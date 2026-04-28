@@ -473,6 +473,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           const buf = await fs.readFile(fp);
           res.writeHead(200, {
             "Content-Type": "application/pdf",
+            "Content-Disposition": `inline; filename="${name}.pdf"`,
             "Cache-Control": "no-cache",
             "X-Content-Type-Options": "nosniff",
           });
