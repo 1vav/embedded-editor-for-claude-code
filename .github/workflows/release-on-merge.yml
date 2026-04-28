@@ -29,6 +29,7 @@ name: Release on merge to main
 on:
   push:
     branches: [main]
+  workflow_dispatch:   # allow manual triggers: gh workflow run release-on-merge.yml --ref <branch>
 
 permissions:
   id-token: write   # needed for OIDC trusted publisher + --provenance
