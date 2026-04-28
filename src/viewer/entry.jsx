@@ -1479,6 +1479,36 @@ function TldrawEditor({ name, onUserSave }) {
 
 // ─── Note View ────────────────────────────────────────────────────────────────
 
+function CtxMenu({ menu, T, onClose, onToast }) {
+  const copy = (text, label) => {
+    const done = () => { onToast(label + " copied"); setTimeout(() => onToast(""), 1800); onClose(); };
+    const fail = () => { onToast("copy unavailable"); setTimeout(() => onToast(""), 1800); onClose(); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(fail);
+    else { try { const ta = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;opacity:0" }); document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); done(); } catch { fail(); } }
+  };
+  const btnStyle = { display: "block", width: "100%", background: "none", border: "none",
+    color: T.text, padding: "6px 14px", cursor: "pointer", textAlign: "left",
+    fontFamily: T.mono, fontSize: 12 };
+  const left = Math.min(menu.x, window.innerWidth - 190);
+  const top  = Math.min(menu.y, window.innerHeight - 110);
+  return (
+    <div onMouseDown={e => e.stopPropagation()} style={{
+      position: "fixed", left, top, zIndex: 9999, background: T.surface,
+      border: `1px solid ${T.border2}`, borderRadius: 7,
+      boxShadow: "0 4px 16px rgba(0,0,0,.18)", padding: "4px 0", minWidth: 180,
+    }}>
+      {menu.linkText && (
+        <button style={btnStyle} onClick={() => copy(menu.linkText, "link")}>Copy link</button>
+      )}
+      {menu.sel && (
+        <button style={btnStyle} onClick={() => copy(menu.sel, "selection")}>Copy selection</button>
+      )}
+      {(menu.linkText || menu.sel) && <div style={{ borderTop: `1px solid ${T.border}`, margin: "4px 0" }} />}
+      <button style={{ ...btnStyle, color: T.muted }} onClick={() => copy(menu.raw, "markdown")}>Copy note as Markdown</button>
+    </div>
+  );
+}
+
 function EmbedDeleteBtn({ name, type, onDelete }) {
   const T = useT();
   const [confirm, setConfirm] = useState(false);
@@ -1966,7 +1996,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const handleContextMenu = useCallback((e) => {
     e.preventDefault();
     const sel = window.getSelection()?.toString() ?? "";
-    setCtxMenu({ x: e.clientX, y: e.clientY, sel, raw });
+    const link = e.target.closest("a[data-wl], a[data-external], a[href]");
+    const linkText = link ? (link.dataset.wl || link.dataset.external || link.href || "") : "";
+    setCtxMenu({ x: e.clientX, y: e.clientY, sel, raw, linkText });
   }, [raw]);
 
   // Dismiss context menu on outside click or Escape
@@ -2126,30 +2158,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
       )}
 
       {ctxMenu && createPortal(
-        <div
-          onMouseDown={e => e.stopPropagation()}
-          style={{
-            position: "fixed", left: Math.min(ctxMenu.x, window.innerWidth - 180),
-            top: Math.min(ctxMenu.y, window.innerHeight - 100),
-            zIndex: 9999, background: T.surface, border: `1px solid ${T.border2}`,
-            borderRadius: 7, boxShadow: "0 4px 16px rgba(0,0,0,.18)", padding: "4px 0",
-            minWidth: 170, fontFamily: T.mono, fontSize: 12,
-          }}>
-          {ctxMenu.sel && (
-            <button
-              onClick={() => { navigator.clipboard?.writeText(ctxMenu.sel); setCtxMenu(null); }}
-              style={{ display: "block", width: "100%", background: "none", border: "none",
-                color: T.text, padding: "6px 14px", cursor: "pointer", textAlign: "left" }}>
-              Copy selection
-            </button>
-          )}
-          <button
-            onClick={() => { navigator.clipboard?.writeText(ctxMenu.raw); setCtxMenu(null); }}
-            style={{ display: "block", width: "100%", background: "none", border: "none",
-              color: T.text, padding: "6px 14px", cursor: "pointer", textAlign: "left" }}>
-            Copy note as Markdown
-          </button>
-        </div>,
+        <CtxMenu menu={ctxMenu} T={T} onClose={() => setCtxMenu(null)} onToast={setLinkToast} />,
         document.body
       )}
 
