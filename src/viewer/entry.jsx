@@ -134,6 +134,9 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     ".cm-tooltip-autocomplete ul li[aria-selected]":  { background: N.surface3 },
     ".cm-completionLabel":                            { flex: "1", color: N.text, fontSize: "12px" },
     ".cm-completionDetail":                           { color: N.muted, fontSize: "11px", fontStyle: "normal", flexShrink: 0 },
+    // Frontmatter block
+    ".cm-fm-delim":    { background: N.surface3 + "cc", color: N.accent + "cc", fontFamily: T.mono, fontWeight: "600", letterSpacing: ".05em" },
+    ".cm-fm-line":     { background: N.surface3 + "66", fontFamily: T.mono, fontSize: "0.87em", color: N.textDim },
     // Drag-to-reorder handles
     ".ee-drag-handle":         { display: "inline-block", width: "0", height: "0", overflow: "visible" },
     ".ee-drag-handle-btn":     { position: "absolute", left: "-40px", top: "50%", transform: "translateY(-50%)", width: "24px", height: "1.4em", display: "flex", alignItems: "center", justifyContent: "center", cursor: "grab", color: "transparent", userSelect: "none", fontSize: "14px", borderRadius: "4px", transition: "color 0.1s, background 0.08s" },
@@ -265,6 +268,39 @@ const markdownLivePreview = ViewPlugin.fromClass(class {
       this.tree = tree;
       this.decorations = buildMarkdownDecorations(update.view);
     }
+  }
+}, { decorations: v => v.decorations });
+
+// ─── Frontmatter decorations ──────────────────────────────────────────────────
+
+function buildFrontmatterDecorations(view) {
+  const { state } = view;
+  const doc = state.doc;
+  if (doc.lines < 2) return Decoration.none;
+  const firstLine = doc.line(1).text;
+  if (firstLine !== "---") return Decoration.none;
+
+  // Find closing ---
+  let endLine = -1;
+  for (let i = 2; i <= Math.min(doc.lines, 60); i++) {
+    if (doc.line(i).text === "---") { endLine = i; break; }
+  }
+  if (endLine < 0) return Decoration.none;
+
+  const lb = new RangeSetBuilder();
+  for (let i = 1; i <= endLine; i++) {
+    const line = doc.line(i);
+    const cls = (i === 1 || i === endLine) ? "cm-fm-delim" : "cm-fm-line";
+    lb.add(line.from, line.from, Decoration.line({ class: cls }));
+  }
+  return lb.finish();
+}
+
+const frontmatterPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = buildFrontmatterDecorations(view); }
+  update(update) {
+    if (update.docChanged || update.viewportChanged)
+      this.decorations = buildFrontmatterDecorations(update.view);
   }
 }, { decorations: v => v.decorations });
 
@@ -1791,6 +1827,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
           syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
           EditorView.lineWrapping,
           markdownLivePreview,
+          frontmatterPlugin,
           autocompletion({
             override: [makeSlashSource()],
             activateOnTyping: true,   // handles re-triggering as user types d,i,a,g…
@@ -1902,8 +1939,15 @@ function NoteView({ name, onNavigate, onUserSave }) {
       const url = extLink.dataset.external || extLink.href;
       const done = () => { setLinkToast("link copied"); setTimeout(() => setLinkToast(""), 2000); };
       const fail = () => { setLinkToast("copy unavailable"); setTimeout(() => setLinkToast(""), 2000); };
-      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(fail);
-      else fail();
+      const legacyCopy = () => {
+        const ta = document.createElement("textarea");
+        ta.value = url; ta.style.cssText = "position:fixed;opacity:0";
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } catch { fail(); }
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard) navigator.clipboard.writeText(url).then(done).catch(legacyCopy);
+      else legacyCopy();
       return;
     }
     const wl = e.target.closest("[data-wl]");
