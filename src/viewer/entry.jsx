@@ -1483,8 +1483,15 @@ function CtxMenu({ menu, T, onClose, onToast }) {
   const copy = (text, label) => {
     const done = () => { onToast(label + " copied"); setTimeout(() => onToast(""), 1800); onClose(); };
     const fail = () => { onToast("copy unavailable"); setTimeout(() => onToast(""), 1800); onClose(); };
+    try {
+      const ta = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;top:0;left:0;opacity:0;pointer-events:none" });
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      if (ok) { done(); return; }
+    } catch {}
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(fail);
-    else { try { const ta = Object.assign(document.createElement("textarea"), { value: text, style: "position:fixed;opacity:0" }); document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); done(); } catch { fail(); } }
+    else fail();
   };
   const btnStyle = { display: "block", width: "100%", background: "none", border: "none",
     color: T.text, padding: "6px 14px", cursor: "pointer", textAlign: "left",
