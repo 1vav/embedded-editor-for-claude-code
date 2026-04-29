@@ -311,6 +311,8 @@ const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 
 // Per-file scroll position cache — persists across tab switches and diagram opens
 const noteScrollCache = new Map();
+// Per-diagram viewport/data cache — captures latest local state so viewport survives tab switches
+const diagDataCache   = new Map();
 md.enable("strikethrough");  // ~~strikethrough~~ (enabled explicitly; noop if already on)
 const _fence = md.renderer.rules.fence.bind(md.renderer);
 md.renderer.rules.fence = (tokens, idx, options, env, self) =>
@@ -696,7 +698,7 @@ function Btn({ children, onClick, accent, small, disabled, title }) {
   );
 }
 
-function Ghost({ children, onClick, active, title, danger, pref }) {
+function Ghost({ children, onClick, active, title, danger, pref, disabled, style: xStyle }) {
   const T = useT();
   const [h, sH] = useState(false);
   // pref=true: preference/secondary controls — visually receded vs. mode buttons
@@ -710,12 +712,15 @@ function Ghost({ children, onClick, active, title, danger, pref }) {
     : pref  ? (active ? T.muted : h ? T.muted : T.muted2)
     : (active ? T.text : h ? T.textDim : T.muted);
   return (
-    <button onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} title={title} style={{
-      background: bg, border: bdr, color,
-      borderRadius: 5, padding: "3px 7px", cursor: "pointer",
-      fontFamily: T.mono, fontSize: 12, transition: "all .1s",
-      display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
-    }}>
+    <button onClick={disabled ? undefined : onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} title={title}
+      disabled={disabled}
+      style={{
+        background: bg, border: bdr, color,
+        borderRadius: 5, padding: "3px 7px", cursor: disabled ? "default" : "pointer",
+        fontFamily: T.mono, fontSize: 12, transition: "all .1s",
+        display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
+        opacity: disabled ? 0.35 : 1, ...xStyle,
+      }}>
       {children}
     </button>
   );
@@ -1150,6 +1155,7 @@ function BrandMark({ onHome }) {
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, connected,
+  canBack, canForward, onBack, onForward,
   onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, onOpen, onDelete }) {
   const T = useT();
   const [dropOpen,  setDropOpen]  = useState(false);
@@ -1212,6 +1218,10 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
       flexShrink: 0, userSelect: "none", position: "relative",
     }}>
       <BrandMark onHome={onHome} />
+
+      {/* Back / Forward navigation */}
+      <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref>◂</Ghost>
+      <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref>▸</Ghost>
 
       {/* File browser dropdown */}
       <div style={{ position: "relative", flexShrink: 0 }}>
@@ -1346,8 +1356,13 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
         setLoading(false);
         return;
       }
-      setData(d); dataRef.current = d; setLoading(false);
+      // Prefer locally-cached data (captures viewport/elements before debounce fires)
+      const cached = diagDataCache.get(name);
+      const initial = cached ?? d;
+      setData(initial); dataRef.current = initial; setLoading(false);
     }).catch(e => { setErr(e.message); setLoading(false); });
+    // On unmount, snapshot latest local state so the next mount can restore it
+    return () => { if (dataRef.current) diagDataCache.set(name, dataRef.current); };
   }, [name]);
 
   const doSave = useCallback(async (elements, appState, files) => {
@@ -1359,6 +1374,12 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
   }, [name, onUserSave]);
 
   const debouncedSave = useDebounced(doSave, 900);
+
+  // Keep dataRef current on every change (including viewport pan/zoom before debounce fires)
+  const handleChange = useCallback((elements, appState, files) => {
+    if (dataRef.current) dataRef.current = { ...dataRef.current, elements, appState, files };
+    debouncedSave(elements, appState, files);
+  }, [debouncedSave]);
 
   // Handle Excalidraw element link clicks via the official onLinkOpen prop
   // (window.open interception doesn't work — preview pane blocks non-localhost URLs
@@ -1396,7 +1417,7 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
       <Excalidraw key={name}
         theme={T.excalidraw}
         initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files ?? {} }}
-        onChange={debouncedSave}
+        onChange={handleChange}
         onLinkOpen={handleLinkOpen} />
     </div>
   );
@@ -2659,6 +2680,48 @@ function App() {
 
   useEffect(() => { try { localStorage.setItem("ee-tabs", JSON.stringify(tabs)); } catch {} }, [tabs]);
   useEffect(() => { try { localStorage.setItem("ee-active", JSON.stringify(active)); } catch {} }, [active]);
+
+  // ── Navigation history (back/forward) ─────────────────────────────────────
+  const navStack    = useRef([]);   // [{name, type}]
+  const navIdx      = useRef(-1);
+  const navTraveling = useRef(false); // true while back/forward is executing (suppress push)
+  const [canBack,    setCanBack]    = useState(false);
+  const [canForward, setCanForward] = useState(false);
+
+  const pushNav = useCallback((tab) => {
+    if (navTraveling.current) return;
+    const cur = navStack.current[navIdx.current];
+    if (cur && cur.name === tab.name && cur.type === tab.type) return; // dedupe
+    navStack.current = navStack.current.slice(0, navIdx.current + 1);
+    navStack.current.push(tab);
+    navIdx.current = navStack.current.length - 1;
+    setCanBack(navIdx.current > 0);
+    setCanForward(false);
+  }, []);
+
+  const goBack = useCallback(() => {
+    if (navIdx.current <= 0) return;
+    navTraveling.current = true;
+    navIdx.current--;
+    const tab = navStack.current[navIdx.current];
+    setCanBack(navIdx.current > 0);
+    setCanForward(navIdx.current < navStack.current.length - 1);
+    setTabs(t => t.find(x => x.name === tab.name && x.type === tab.type) ? t : [...t, tab]);
+    setActive(tab);
+    navTraveling.current = false;
+  }, []);
+
+  const goForward = useCallback(() => {
+    if (navIdx.current >= navStack.current.length - 1) return;
+    navTraveling.current = true;
+    navIdx.current++;
+    const tab = navStack.current[navIdx.current];
+    setCanBack(navIdx.current > 0);
+    setCanForward(navIdx.current < navStack.current.length - 1);
+    setTabs(t => t.find(x => x.name === tab.name && x.type === tab.type) ? t : [...t, tab]);
+    setActive(tab);
+    navTraveling.current = false;
+  }, []);
   const [showHist,  setShowHist]  = useState(false);
   const [showExp,   setShowExp]   = useState(false);
   const [showNew,   setShowNew]   = useState(false);
@@ -2724,7 +2787,7 @@ function App() {
         name = match ?? rawName;
         const tab = { name, type: resolved };
         setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
-        setActive(tab);
+        setActive(tab); pushNav(tab);
         return;
       }
       const lo = rawName.toLowerCase();
@@ -2760,8 +2823,8 @@ function App() {
 
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
-    setActive(tab);
-  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles]);
+    setActive(tab); pushNav(tab);
+  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles, pushNav]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
@@ -2824,10 +2887,12 @@ function App() {
     const h = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); setShowNew(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "w") { e.preventDefault(); if (active) closeTab(active); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "[") { e.preventDefault(); goBack(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "]") { e.preventDefault(); goForward(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [active, closeTab]);
+  }, [active, closeTab, goBack, goForward]);
 
   const T = isDark ? DARK : LIGHT;
 
@@ -2836,9 +2901,10 @@ function App() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: T.bg }}>
       <TopBar
         tabs={tabs} active={active}
-        onSelect={setActive} onClose={closeTab}
+        onSelect={tab => { setActive(tab); pushNav(tab); }} onClose={closeTab}
         onRename={handleRename} onNew={() => setShowNew(true)}
         onHome={() => setActive(null)}
+        canBack={canBack} canForward={canForward} onBack={goBack} onForward={goForward}
         connected={connected}
         onExport={() => setShowExp(true)}
         onHistory={() => setShowHist(h => !h)}
