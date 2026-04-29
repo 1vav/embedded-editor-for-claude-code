@@ -1163,6 +1163,14 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
   const [canRight,  setCanRight]  = useState(false);
   const tabsRef = useRef();
 
+  // Tab list popover — hover over active tab to open vertical switcher
+  const [tabListOpen,  setTabListOpen]  = useState(false);
+  const [tabListRect,  setTabListRect]  = useState(null);
+  const tabListTimer = useRef(null);
+  const openTabList  = useCallback(rect => { clearTimeout(tabListTimer.current); setTabListRect(rect); setTabListOpen(true);  }, []);
+  const schedCloseTabList = useCallback(()  => { tabListTimer.current = setTimeout(() => setTabListOpen(false), 160); }, []);
+  const cancelCloseTabList = useCallback(() => { clearTimeout(tabListTimer.current); }, []);
+
   // Recompute overflow arrows whenever tabs or container size change
   const updateOverflow = useCallback(() => {
     const el = tabsRef.current;
@@ -1221,8 +1229,8 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
 
       {/* Back / Forward navigation — compact pair */}
       <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
-        <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref style={{ padding: "3px 5px", fontSize: 13 }}>‹</Ghost>
-        <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref style={{ padding: "3px 5px", fontSize: 13 }}>›</Ghost>
+        <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref style={{ padding: "2px 3px", fontSize: 13 }}>‹</Ghost>
+        <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref style={{ padding: "2px 3px", fontSize: 13 }}>›</Ghost>
       </div>
 
       {/* File browser dropdown */}
@@ -1250,14 +1258,28 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
         <div ref={tabsRef} onScroll={updateOverflow}
           style={{ display: "flex", gap: 2, flex: 1, alignItems: "center",
             overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
-          {tabs.map(tab => (
-            <FileTab key={tab.name + tab.type} tab={tab}
-              active={active?.name === tab.name && active?.type === tab.type}
-              onSelect={() => onSelect(tab)}
-              onClose={() => onClose(tab)}
-              onRename={(newName) => onRename(tab, newName)} />
-          ))}
+          {tabs.map(tab => {
+            const isActive = active?.name === tab.name && active?.type === tab.type;
+            return (
+              <div key={tab.name + tab.type} style={{ flexShrink: 0 }}
+                onMouseEnter={tabs.length >= 2
+                  ? e => openTabList(e.currentTarget.getBoundingClientRect()) : undefined}
+                onMouseLeave={tabs.length >= 2 ? schedCloseTabList : undefined}>
+                <FileTab tab={tab} active={isActive}
+                  onSelect={() => onSelect(tab)}
+                  onClose={() => onClose(tab)}
+                  onRename={newName => onRename(tab, newName)} />
+              </div>
+            );
+          })}
         </div>
+      {tabListOpen && tabListRect && (
+        <TabListPopover tabs={tabs} active={active} anchorRect={tabListRect}
+          onSelect={tab => { onSelect(tab); setTabListOpen(false); }}
+          onClose={tab => onClose(tab)}
+          onMouseEnter={cancelCloseTabList}
+          onMouseLeave={schedCloseTabList} />
+      )}
       </div>
 
       {/* New-tab button — outside scroll area so it's always reachable */}
@@ -1277,6 +1299,75 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
           transition: "all .4s",
         }} />
       </div>
+    </div>
+  );
+}
+
+// ─── Tab List Popover ─────────────────────────────────────────────────────────
+// Vertical tab switcher that pops up when hovering over the active tab.
+
+const TAB_ICON       = t => t === "diagram" ? "⬡" : t === "tldraw" ? "◈" : t === "code" ? "</>" : t === "table" ? "⊟" : "¶";
+const TAB_ICON_COLOR = (t, T) => t === "diagram" ? T.accent : t === "tldraw" ? T.tldraw : t === "code" ? T.orange : T.blue;
+
+function TabListPopover({ tabs, active, anchorRect, onSelect, onClose, onMouseEnter, onMouseLeave }) {
+  const T = useT();
+  return (
+    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      style={{
+        position: "fixed",
+        top: anchorRect.bottom + 4,
+        left: anchorRect.left,
+        zIndex: 1200,
+        background: T.bg,
+        border: `1px solid ${T.border2}`,
+        borderRadius: 8,
+        boxShadow: "0 6px 20px #0003",
+        minWidth: 200,
+        maxWidth: 340,
+        maxHeight: "60vh",
+        overflowY: "auto",
+        padding: "4px 0",
+        scrollbarWidth: "none",
+      }}>
+      {tabs.map(tab => {
+        const isActive = active?.name === tab.name && active?.type === tab.type;
+        const short = tab.name.includes("/") ? tab.name.split("/").pop() : tab.name;
+        return (
+          <TabListRow key={tab.name + tab.type}
+            tab={tab} short={short} isActive={isActive}
+            onSelect={() => onSelect(tab)}
+            onClose={e => { e.stopPropagation(); onClose(tab); }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function TabListRow({ tab, short, isActive, onSelect, onClose }) {
+  const T = useT();
+  const [h, sH] = useState(false);
+  const [hX, sHX] = useState(false);
+  return (
+    <div onClick={onSelect}
+      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        padding: "5px 10px 5px 10px",
+        background: isActive ? T.surface2 : h ? T.surface : "transparent",
+        cursor: "pointer", transition: "background .1s",
+      }}>
+      {isActive && <span style={{ width: 3, height: 14, background: T.accent, borderRadius: 2, flexShrink: 0 }} />}
+      {!isActive && <span style={{ width: 3, flexShrink: 0 }} />}
+      <span style={{ fontSize: 9, color: TAB_ICON_COLOR(tab.type, T), flexShrink: 0 }}>{TAB_ICON(tab.type)}</span>
+      <span style={{ flex: 1, fontFamily: T.mono, fontSize: 11,
+        color: isActive ? T.text : T.muted,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {short}
+      </span>
+      <span onClick={onClose}
+        onMouseEnter={() => sHX(true)} onMouseLeave={() => sHX(false)}
+        style={{ color: hX ? T.red : T.muted2, fontSize: 12, padding: "0 2px",
+          cursor: "pointer", transition: "color .1s", flexShrink: 0 }}>×</span>
     </div>
   );
 }
