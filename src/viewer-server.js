@@ -867,21 +867,26 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         if (exEx) return json(res, { type: "diagram", name });
         if (tlEx) return json(res, { type: "tldraw",  name });
         if (dkEx) return json(res, { type: "table",   name });
-        // Case-insensitive fallback — run all four globs in parallel
+        // Case-insensitive fallback — also match by basename (wikilinks are basename-only)
         const lo = name.toLowerCase();
+        const loBase = path.basename(lo);
+        const hits = (arr, ext) => arr.find(f => {
+          const noExt = f.replace(new RegExp(`\\${ext}$`, "i"), "").toLowerCase();
+          return noExt === lo || path.basename(noExt) === loBase;
+        });
         const [allMd, allEx, allTl, allDk] = await Promise.all([
           glob("**/*.md",         { cwd: CWD, ignore: ["node_modules/**"] }),
           glob("**/*.excalidraw", { cwd: CWD, ignore: ["node_modules/**", ".excalidraw-history/**"] }),
           glob("**/*.tldraw",     { cwd: CWD, ignore: ["node_modules/**"] }),
           glob("**/*.duckdb",     { cwd: CWD, ignore: ["node_modules/**"] }),
         ]);
-        const mdHit = allMd.find(f => f.replace(/\.md$/, "").toLowerCase() === lo);
+        const mdHit = hits(allMd, ".md");
         if (mdHit) return json(res, { type: "note",    name: mdHit.replace(/\.md$/, "") });
-        const exHit = allEx.find(f => f.replace(/\.excalidraw$/, "").toLowerCase() === lo);
+        const exHit = hits(allEx, ".excalidraw");
         if (exHit) return json(res, { type: "diagram", name: exHit.replace(/\.excalidraw$/, "") });
-        const tlHit = allTl.find(f => f.replace(/\.tldraw$/, "").toLowerCase() === lo);
+        const tlHit = hits(allTl, ".tldraw");
         if (tlHit) return json(res, { type: "tldraw",  name: tlHit.replace(/\.tldraw$/, "") });
-        const dkHit = allDk.find(f => f.replace(/\.duckdb$/, "").toLowerCase() === lo);
+        const dkHit = hits(allDk, ".duckdb");
         if (dkHit) return json(res, { type: "table",   name: dkHit.replace(/\.duckdb$/, "") });
         return json(res, { type: null, name });
       }
