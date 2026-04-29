@@ -311,6 +311,8 @@ const md = new MarkdownIt({ html: true, linkify: true, typographer: true });
 
 // Per-file scroll position cache — persists across tab switches and diagram opens
 const noteScrollCache = new Map();
+// Per-diagram viewport/data cache — captures latest local state so viewport survives tab switches
+const diagDataCache   = new Map();
 md.enable("strikethrough");  // ~~strikethrough~~ (enabled explicitly; noop if already on)
 const _fence = md.renderer.rules.fence.bind(md.renderer);
 md.renderer.rules.fence = (tokens, idx, options, env, self) =>
@@ -696,7 +698,7 @@ function Btn({ children, onClick, accent, small, disabled, title }) {
   );
 }
 
-function Ghost({ children, onClick, active, title, danger, pref }) {
+function Ghost({ children, onClick, active, title, danger, pref, disabled, style: xStyle }) {
   const T = useT();
   const [h, sH] = useState(false);
   // pref=true: preference/secondary controls — visually receded vs. mode buttons
@@ -710,12 +712,15 @@ function Ghost({ children, onClick, active, title, danger, pref }) {
     : pref  ? (active ? T.muted : h ? T.muted : T.muted2)
     : (active ? T.text : h ? T.textDim : T.muted);
   return (
-    <button onClick={onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} title={title} style={{
-      background: bg, border: bdr, color,
-      borderRadius: 5, padding: "3px 7px", cursor: "pointer",
-      fontFamily: T.mono, fontSize: 12, transition: "all .1s",
-      display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
-    }}>
+    <button onClick={disabled ? undefined : onClick} onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)} title={title}
+      disabled={disabled}
+      style={{
+        background: bg, border: bdr, color,
+        borderRadius: 5, padding: "3px 7px", cursor: disabled ? "default" : "pointer",
+        fontFamily: T.mono, fontSize: 12, transition: "all .1s",
+        display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
+        opacity: disabled ? 0.35 : 1, ...xStyle,
+      }}>
       {children}
     </button>
   );
@@ -1150,12 +1155,21 @@ function BrandMark({ onHome }) {
 // ─── Top Bar ──────────────────────────────────────────────────────────────────
 
 function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, connected,
+  canBack, canForward, onBack, onForward,
   onExport, onHistory, diagrams, tldrawFiles, notes, codeFiles, tableFiles, pdfFiles, csvFiles, recent, onOpen, onDelete }) {
   const T = useT();
   const [dropOpen,  setDropOpen]  = useState(false);
   const [canLeft,   setCanLeft]   = useState(false);
   const [canRight,  setCanRight]  = useState(false);
   const tabsRef = useRef();
+
+  // Tab list popover — hover over active tab to open vertical switcher
+  const [tabListOpen,  setTabListOpen]  = useState(false);
+  const [tabListRect,  setTabListRect]  = useState(null);
+  const tabListTimer = useRef(null);
+  const openTabList  = useCallback(rect => { clearTimeout(tabListTimer.current); setTabListRect(rect); setTabListOpen(true);  }, []);
+  const schedCloseTabList = useCallback(()  => { tabListTimer.current = setTimeout(() => setTabListOpen(false), 160); }, []);
+  const cancelCloseTabList = useCallback(() => { clearTimeout(tabListTimer.current); }, []);
 
   // Recompute overflow arrows whenever tabs or container size change
   const updateOverflow = useCallback(() => {
@@ -1213,6 +1227,12 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
     }}>
       <BrandMark onHome={onHome} />
 
+      {/* Back / Forward navigation — compact pair */}
+      <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+        <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref style={{ padding: "2px 3px", fontSize: 13 }}>‹</Ghost>
+        <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref style={{ padding: "2px 3px", fontSize: 13 }}>›</Ghost>
+      </div>
+
       {/* File browser dropdown */}
       <div style={{ position: "relative", flexShrink: 0 }}>
         <Ghost onClick={() => setDropOpen(o => !o)} active={dropOpen} title="Browse files">
@@ -1238,14 +1258,28 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
         <div ref={tabsRef} onScroll={updateOverflow}
           style={{ display: "flex", gap: 2, flex: 1, alignItems: "center",
             overflowX: "auto", overflowY: "hidden", scrollbarWidth: "none" }}>
-          {tabs.map(tab => (
-            <FileTab key={tab.name + tab.type} tab={tab}
-              active={active?.name === tab.name && active?.type === tab.type}
-              onSelect={() => onSelect(tab)}
-              onClose={() => onClose(tab)}
-              onRename={(newName) => onRename(tab, newName)} />
-          ))}
+          {tabs.map(tab => {
+            const isActive = active?.name === tab.name && active?.type === tab.type;
+            return (
+              <div key={tab.name + tab.type} style={{ flexShrink: 0 }}
+                onMouseEnter={tabs.length >= 2
+                  ? e => openTabList(e.currentTarget.getBoundingClientRect()) : undefined}
+                onMouseLeave={tabs.length >= 2 ? schedCloseTabList : undefined}>
+                <FileTab tab={tab} active={isActive}
+                  onSelect={() => onSelect(tab)}
+                  onClose={() => onClose(tab)}
+                  onRename={newName => onRename(tab, newName)} />
+              </div>
+            );
+          })}
         </div>
+      {tabListOpen && tabListRect && (
+        <TabListPopover tabs={tabs} active={active} anchorRect={tabListRect}
+          onSelect={tab => { onSelect(tab); setTabListOpen(false); }}
+          onClose={tab => onClose(tab)}
+          onMouseEnter={cancelCloseTabList}
+          onMouseLeave={schedCloseTabList} />
+      )}
       </div>
 
       {/* New-tab button — outside scroll area so it's always reachable */}
@@ -1265,6 +1299,75 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
           transition: "all .4s",
         }} />
       </div>
+    </div>
+  );
+}
+
+// ─── Tab List Popover ─────────────────────────────────────────────────────────
+// Vertical tab switcher that pops up when hovering over the active tab.
+
+const TAB_ICON       = t => t === "diagram" ? "⬡" : t === "tldraw" ? "◈" : t === "code" ? "</>" : t === "table" ? "⊟" : "¶";
+const TAB_ICON_COLOR = (t, T) => t === "diagram" ? T.accent : t === "tldraw" ? T.tldraw : t === "code" ? T.orange : T.blue;
+
+function TabListPopover({ tabs, active, anchorRect, onSelect, onClose, onMouseEnter, onMouseLeave }) {
+  const T = useT();
+  return (
+    <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}
+      style={{
+        position: "fixed",
+        top: anchorRect.bottom + 4,
+        left: anchorRect.left,
+        zIndex: 1200,
+        background: T.bg,
+        border: `1px solid ${T.border2}`,
+        borderRadius: 8,
+        boxShadow: "0 6px 20px #0003",
+        minWidth: 200,
+        maxWidth: 340,
+        maxHeight: "60vh",
+        overflowY: "auto",
+        padding: "4px 0",
+        scrollbarWidth: "none",
+      }}>
+      {tabs.map(tab => {
+        const isActive = active?.name === tab.name && active?.type === tab.type;
+        const short = tab.name.includes("/") ? tab.name.split("/").pop() : tab.name;
+        return (
+          <TabListRow key={tab.name + tab.type}
+            tab={tab} short={short} isActive={isActive}
+            onSelect={() => onSelect(tab)}
+            onClose={e => { e.stopPropagation(); onClose(tab); }} />
+        );
+      })}
+    </div>
+  );
+}
+
+function TabListRow({ tab, short, isActive, onSelect, onClose }) {
+  const T = useT();
+  const [h, sH] = useState(false);
+  const [hX, sHX] = useState(false);
+  return (
+    <div onClick={onSelect}
+      onMouseEnter={() => sH(true)} onMouseLeave={() => sH(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        padding: "5px 10px 5px 10px",
+        background: isActive ? T.surface2 : h ? T.surface : "transparent",
+        cursor: "pointer", transition: "background .1s",
+      }}>
+      {isActive && <span style={{ width: 3, height: 14, background: T.accent, borderRadius: 2, flexShrink: 0 }} />}
+      {!isActive && <span style={{ width: 3, flexShrink: 0 }} />}
+      <span style={{ fontSize: 9, color: TAB_ICON_COLOR(tab.type, T), flexShrink: 0 }}>{TAB_ICON(tab.type)}</span>
+      <span style={{ flex: 1, fontFamily: T.mono, fontSize: 11,
+        color: isActive ? T.text : T.muted,
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {short}
+      </span>
+      <span onClick={onClose}
+        onMouseEnter={() => sHX(true)} onMouseLeave={() => sHX(false)}
+        style={{ color: hX ? T.red : T.muted2, fontSize: 12, padding: "0 2px",
+          cursor: "pointer", transition: "color .1s", flexShrink: 0 }}>×</span>
     </div>
   );
 }
@@ -1346,8 +1449,13 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
         setLoading(false);
         return;
       }
-      setData(d); dataRef.current = d; setLoading(false);
+      // Prefer locally-cached data (captures viewport/elements before debounce fires)
+      const cached = diagDataCache.get(name);
+      const initial = cached ?? d;
+      setData(initial); dataRef.current = initial; setLoading(false);
     }).catch(e => { setErr(e.message); setLoading(false); });
+    // On unmount, snapshot latest local state so the next mount can restore it
+    return () => { if (dataRef.current) diagDataCache.set(name, dataRef.current); };
   }, [name]);
 
   const doSave = useCallback(async (elements, appState, files) => {
@@ -1359,6 +1467,12 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
   }, [name, onUserSave]);
 
   const debouncedSave = useDebounced(doSave, 900);
+
+  // Keep dataRef current on every change (including viewport pan/zoom before debounce fires)
+  const handleChange = useCallback((elements, appState, files) => {
+    if (dataRef.current) dataRef.current = { ...dataRef.current, elements, appState, files };
+    debouncedSave(elements, appState, files);
+  }, [debouncedSave]);
 
   // Handle Excalidraw element link clicks via the official onLinkOpen prop
   // (window.open interception doesn't work — preview pane blocks non-localhost URLs
@@ -1396,7 +1510,7 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
       <Excalidraw key={name}
         theme={T.excalidraw}
         initialData={{ elements: data?.elements || [], appState: { ...data?.appState, collaborators: [] }, files: data?.files ?? {} }}
-        onChange={debouncedSave}
+        onChange={handleChange}
         onLinkOpen={handleLinkOpen} />
     </div>
   );
@@ -2659,6 +2773,48 @@ function App() {
 
   useEffect(() => { try { localStorage.setItem("ee-tabs", JSON.stringify(tabs)); } catch {} }, [tabs]);
   useEffect(() => { try { localStorage.setItem("ee-active", JSON.stringify(active)); } catch {} }, [active]);
+
+  // ── Navigation history (back/forward) ─────────────────────────────────────
+  const navStack    = useRef([]);   // [{name, type}]
+  const navIdx      = useRef(-1);
+  const navTraveling = useRef(false); // true while back/forward is executing (suppress push)
+  const [canBack,    setCanBack]    = useState(false);
+  const [canForward, setCanForward] = useState(false);
+
+  const pushNav = useCallback((tab) => {
+    if (navTraveling.current) return;
+    const cur = navStack.current[navIdx.current];
+    if (cur && cur.name === tab.name && cur.type === tab.type) return; // dedupe
+    navStack.current = navStack.current.slice(0, navIdx.current + 1);
+    navStack.current.push(tab);
+    navIdx.current = navStack.current.length - 1;
+    setCanBack(navIdx.current > 0);
+    setCanForward(false);
+  }, []);
+
+  const goBack = useCallback(() => {
+    if (navIdx.current <= 0) return;
+    navTraveling.current = true;
+    navIdx.current--;
+    const tab = navStack.current[navIdx.current];
+    setCanBack(navIdx.current > 0);
+    setCanForward(navIdx.current < navStack.current.length - 1);
+    setTabs(t => t.find(x => x.name === tab.name && x.type === tab.type) ? t : [...t, tab]);
+    setActive(tab);
+    navTraveling.current = false;
+  }, []);
+
+  const goForward = useCallback(() => {
+    if (navIdx.current >= navStack.current.length - 1) return;
+    navTraveling.current = true;
+    navIdx.current++;
+    const tab = navStack.current[navIdx.current];
+    setCanBack(navIdx.current > 0);
+    setCanForward(navIdx.current < navStack.current.length - 1);
+    setTabs(t => t.find(x => x.name === tab.name && x.type === tab.type) ? t : [...t, tab]);
+    setActive(tab);
+    navTraveling.current = false;
+  }, []);
   const [showHist,  setShowHist]  = useState(false);
   const [showExp,   setShowExp]   = useState(false);
   const [showNew,   setShowNew]   = useState(false);
@@ -2724,7 +2880,7 @@ function App() {
         name = match ?? rawName;
         const tab = { name, type: resolved };
         setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
-        setActive(tab);
+        setActive(tab); pushNav(tab);
         return;
       }
       const lo = rawName.toLowerCase();
@@ -2760,8 +2916,8 @@ function App() {
 
     const tab = { name, type: resolved };
     setTabs(t => t.find(x => x.name === name && x.type === resolved) ? t : [...t, tab]);
-    setActive(tab);
-  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles]);
+    setActive(tab); pushNav(tab);
+  }, [notes, diagrams, tldrawFiles, tableFiles, pdfFiles, csvFiles, pushNav]);
 
   const closeTab = useCallback((tab) => {
     setTabs(prev => {
@@ -2824,10 +2980,12 @@ function App() {
     const h = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "n") { e.preventDefault(); setShowNew(true); }
       if ((e.metaKey || e.ctrlKey) && e.key === "w") { e.preventDefault(); if (active) closeTab(active); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "[") { e.preventDefault(); goBack(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === "]") { e.preventDefault(); goForward(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
-  }, [active, closeTab]);
+  }, [active, closeTab, goBack, goForward]);
 
   const T = isDark ? DARK : LIGHT;
 
@@ -2836,9 +2994,10 @@ function App() {
     <div style={{ display: "flex", flexDirection: "column", height: "100vh", overflow: "hidden", background: T.bg }}>
       <TopBar
         tabs={tabs} active={active}
-        onSelect={setActive} onClose={closeTab}
+        onSelect={tab => { setActive(tab); pushNav(tab); }} onClose={closeTab}
         onRename={handleRename} onNew={() => setShowNew(true)}
         onHome={() => setActive(null)}
+        canBack={canBack} canForward={canForward} onBack={goBack} onForward={goForward}
         connected={connected}
         onExport={() => setShowExp(true)}
         onHistory={() => setShowHist(h => !h)}
