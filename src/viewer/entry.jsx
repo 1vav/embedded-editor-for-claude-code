@@ -1219,9 +1219,11 @@ function TopBar({ tabs, active, onSelect, onClose, onRename, onNew, onHome, conn
     }}>
       <BrandMark onHome={onHome} />
 
-      {/* Back / Forward navigation */}
-      <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref>◂</Ghost>
-      <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref>▸</Ghost>
+      {/* Back / Forward navigation — compact pair */}
+      <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
+        <Ghost onClick={onBack}    disabled={!canBack}    title="Go back (⌘[)"    pref style={{ padding: "3px 5px", fontSize: 13 }}>‹</Ghost>
+        <Ghost onClick={onForward} disabled={!canForward} title="Go forward (⌘])" pref style={{ padding: "3px 5px", fontSize: 13 }}>›</Ghost>
+      </div>
 
       {/* File browser dropdown */}
       <div style={{ position: "relative", flexShrink: 0 }}>
