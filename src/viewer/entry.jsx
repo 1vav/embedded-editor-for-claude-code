@@ -2728,12 +2728,15 @@ function App() {
         return;
       }
       const lo = rawName.toLowerCase();
-      const noteMatch  = notes.find(n => n.toLowerCase() === lo);
-      const diagMatch  = diagrams.find(d => d.toLowerCase() === lo);
-      const tldrMatch  = tldrawFiles.find(t => t.toLowerCase() === lo);
-      const tableMatch = tableFiles.find(t => t.toLowerCase() === lo);
-      const pdfMatch   = pdfFiles.find(p => p.toLowerCase() === lo);
-      const csvMatch   = csvFiles.find(p => p.toLowerCase() === lo);
+      // Match by full path or basename (wikilinks are basename-only)
+      const loBase = lo.split("/").pop();
+      const byLo = (n) => { const nl = n.toLowerCase(); return nl === lo || nl.split("/").pop() === loBase; };
+      const noteMatch  = notes.find(byLo);
+      const diagMatch  = diagrams.find(byLo);
+      const tldrMatch  = tldrawFiles.find(byLo);
+      const tableMatch = tableFiles.find(byLo);
+      const pdfMatch   = pdfFiles.find(byLo);
+      const csvMatch   = csvFiles.find(byLo);
 
       if      (tableMatch)                               { resolved = "table";   name = tableMatch; }
       else if (pdfMatch)                                 { resolved = "pdf";     name = pdfMatch; }
