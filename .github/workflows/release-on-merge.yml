@@ -85,7 +85,7 @@ jobs:
 
       - name: Exchange OIDC JWT for short-lived npm token
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // npm trusted publisher requires audience "npm:registry.npmjs.org" (not "npm:publish").
@@ -139,7 +139,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.tag_check.outputs.exists == 'false' && !contains(steps.pkg.outputs.version, '-')
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const tag  = "${{ steps.tag_check.outputs.tag }}";
