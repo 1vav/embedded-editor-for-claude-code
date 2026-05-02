@@ -2760,6 +2760,10 @@ function timeAgo(ts) {
 
 function App() {
   const isDark = useDarkMode();
+  // Read session ID injected by editor-start; stable for the component lifetime
+  const [sessionId] = useState(() => localStorage.getItem('editorSession') ?? 'default');
+  const tabsKey   = `ee-tabs-${sessionId}`;
+  const activeKey = `ee-active-${sessionId}`;
   const [diagrams,    setDiagrams]    = useState([]);
   const [tldrawFiles, setTldrawFiles] = useState([]);
   const [notes,       setNotes]       = useState([]);
@@ -2768,11 +2772,37 @@ function App() {
   const [pdfFiles,    setPdfFiles]    = useState([]);
   const [csvFiles,    setCsvFiles]    = useState([]);
   const [recent,      setRecent]      = useState([]); // [{name, type, at}]
-  const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem("ee-tabs") ?? "[]"); } catch { return []; } });
-  const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem("ee-active") ?? "null"); } catch { return null; } });
+  const [tabs,      setTabs]      = useState(() => { try { return JSON.parse(localStorage.getItem(tabsKey) ?? "[]"); } catch { return []; } });
+  const [active,    setActive]    = useState(() => { try { return JSON.parse(localStorage.getItem(activeKey) ?? "null"); } catch { return null; } });
 
-  useEffect(() => { try { localStorage.setItem("ee-tabs", JSON.stringify(tabs)); } catch {} }, [tabs]);
-  useEffect(() => { try { localStorage.setItem("ee-active", JSON.stringify(active)); } catch {} }, [active]);
+  useEffect(() => { try { localStorage.setItem(tabsKey, JSON.stringify(tabs)); } catch {} }, [tabs, tabsKey]);
+  useEffect(() => { try { localStorage.setItem(activeKey, JSON.stringify(active)); } catch {} }, [active, activeKey]);
+
+  const sessionSaveTimer = useRef(null);
+  useEffect(() => {
+    clearTimeout(sessionSaveTimer.current);
+    sessionSaveTimer.current = setTimeout(() => {
+      fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+        body: JSON.stringify({ activeFile: active, openTabs: tabs, scrollPosition: { x: 0, y: 0 }, panelSizes: { sidebar: 240 } }),
+      }).catch(() => {});
+    }, 500);
+  }, [tabs, active, sessionId]);
+
+  const sessionRestored = useRef(false);
+  useEffect(() => {
+    if (sessionRestored.current) return;
+    sessionRestored.current = true;
+    fetch(`/api/session/${encodeURIComponent(sessionId)}`)
+      .then(r => r.json())
+      .then(state => {
+        if (!state.openTabs?.length) return;
+        setTabs(state.openTabs);
+        if (state.activeFile) setActive(state.activeFile);
+      })
+      .catch(() => {});
+  }, [sessionId]);
 
   // ── Navigation history (back/forward) ─────────────────────────────────────
   const navStack    = useRef([]);   // [{name, type}]
