@@ -518,11 +518,11 @@ export async function startViewerServer(port = DEFAULT_PORT) {
       }
       if (method === "PUT" && pathname.startsWith("/api/session/")) {
         const sid = decodeURIComponent(pathname.slice("/api/session/".length));
-        let body = "";
-        for await (const chunk of req) body += chunk;
         try {
-          const state = JSON.parse(body);
+          const state = await readBody(req);
+          if (!state || typeof state !== "object") { res.writeHead(400); return res.end("bad json"); }
           sessionStates.set(sid, state);
+          trimCache(sessionStates, 500);
           return json(res, { ok: true });
         } catch {
           res.writeHead(400); return res.end("bad json");

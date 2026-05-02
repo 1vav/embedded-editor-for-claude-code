@@ -2760,8 +2760,8 @@ function timeAgo(ts) {
 
 function App() {
   const isDark = useDarkMode();
-  // Read session ID injected by editor-start via localStorage; fall back to 'default'
-  const sessionId = localStorage.getItem('editorSession') ?? 'default';
+  // Read session ID injected by editor-start; stable for the component lifetime
+  const [sessionId] = useState(() => localStorage.getItem('editorSession') ?? 'default');
   const tabsKey   = `ee-tabs-${sessionId}`;
   const activeKey = `ee-active-${sessionId}`;
   const [diagrams,    setDiagrams]    = useState([]);
