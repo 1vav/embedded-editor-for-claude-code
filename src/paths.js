@@ -1,6 +1,5 @@
 import os from "os";
 import path from "path";
-import { existsSync } from "fs";
 
 export const DEFAULT_PORT = 3000;
 
@@ -13,27 +12,6 @@ export function expandPath(raw) {
   out = out.replace(/\$USER\b/g, os.userInfo().username || "");
   if (out.startsWith("~/") || out === "~") out = path.join(os.homedir(), out.slice(1));
   return out;
-}
-
-// Walk up from dir looking for workspace anchors to find the project root.
-// Anchors in priority order: .claude/ (Claude Code project), .git, CLAUDE.md.
-// .claude/ is checked first because it's the most specific signal — a folder
-// that has been explicitly initialised as a Claude Code workspace should win
-// over a parent that merely has a CLAUDE.md or git root.
-function findProjectRoot(dir) {
-  let current = path.resolve(dir);
-  while (true) {
-    if (
-      existsSync(path.join(current, ".claude")) ||
-      existsSync(path.join(current, ".git")) ||
-      existsSync(path.join(current, "CLAUDE.md"))
-    ) {
-      return current;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) return dir; // filesystem root — give up
-    current = parent;
-  }
 }
 
 // Derive a stable port in 3100–3999 from the absolute workspace root path.
@@ -50,25 +28,25 @@ export function resolveRoot() {
   const raw = process.env.EXCALIDRAW_ROOT;
   const log = (msg) => { try { process.stderr.write(`[embedded-editor] ${msg}\n`); } catch {} };
 
-  // No env var set — auto-detect by walking up from cwd.
+  // No env var set — use cwd directly.
   if (!raw) {
-    const detected = findProjectRoot(process.cwd());
-    log(`EXCALIDRAW_ROOT unset; auto-detected root=${detected} (cwd=${process.cwd()})`);
+    const detected = process.cwd();
+    log(`EXCALIDRAW_ROOT unset; using cwd=${detected}`);
     return detected;
   }
 
   const expanded = expandPath(raw);
 
-  // "." is the legacy global-init default — treat it like unset so auto-detection runs.
+  // "." is the legacy global-init default — treat it like unset.
   if (expanded === ".") {
-    const detected = findProjectRoot(process.cwd());
-    log(`EXCALIDRAW_ROOT="." (legacy); auto-detected root=${detected} (cwd=${process.cwd()})`);
+    const detected = process.cwd();
+    log(`EXCALIDRAW_ROOT="." (legacy); using cwd=${detected}`);
     return detected;
   }
 
   if (/\$\{[^}]+\}|(?<![\\a-zA-Z0-9])\$[A-Za-z_]\w*/.test(expanded)) {
-    const detected = findProjectRoot(process.cwd());
-    log(`EXCALIDRAW_ROOT=${JSON.stringify(raw)} contains unresolved templates; auto-detected root=${detected}`);
+    const detected = process.cwd();
+    log(`EXCALIDRAW_ROOT=${JSON.stringify(raw)} contains unresolved templates; using cwd=${detected}`);
     return detected;
   }
 
