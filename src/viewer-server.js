@@ -20,12 +20,14 @@
 //   GET  /api/backlinks/:name        who links here
 //   POST /api/rename                 rename + rewrite all links
 //   POST /api/asset                   upload image into assets/ folder
+//   GET  /api/session/:id            get per-session UI state
+//   PUT  /api/session/:id            save per-session UI state
 //   GET  /vendor/*                   static assets
 
 import http  from "http";
 import path  from "path";
 import fs    from "fs/promises";
-import { writeFileSync, readFileSync } from "fs";
+import { writeFileSync, readFileSync, existsSync, renameSync } from "fs";
 import { watch }         from "fs";
 import { glob }          from "glob";
 import { fileURLToPath } from "url";
@@ -40,7 +42,11 @@ const PACKAGE_VERSION = JSON.parse(
 
 const CWD        = ROOT;
 const VENDOR_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "vendor");
-const RECENT_F   = path.join(CWD, ".excalidraw-recent.json");
+const RECENT_F     = path.join(CWD, ".editor-recent.json");
+const RECENT_F_OLD = path.join(CWD, ".excalidraw-recent.json");
+if (existsSync(RECENT_F_OLD) && !existsSync(RECENT_F)) {
+  try { renameSync(RECENT_F_OLD, RECENT_F); } catch {}
+}
 const HIST_DIR   = path.join(CWD, ".excalidraw-history");
 
 // Render cache — keyed by diagram name, invalidated on write
@@ -71,6 +77,9 @@ function queueRender(name, fn) {
   next.finally(() => { if (renderLocks.get(name) === next) renderLocks.delete(name); });
   return next;
 }
+
+// Per-session UI state — keyed by session ID, in-memory only (ephemeral by design)
+const sessionStates = new Map(); // sessionId → SessionState
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 
@@ -501,6 +510,24 @@ export async function startViewerServer(port = DEFAULT_PORT) {
 
       // ── Recent
       if (pathname === "/api/recent") return json(res, await loadRecent());
+
+      // ── Session state
+      if (method === "GET" && pathname.startsWith("/api/session/")) {
+        const sid = decodeURIComponent(pathname.slice("/api/session/".length));
+        return json(res, sessionStates.get(sid) ?? {});
+      }
+      if (method === "PUT" && pathname.startsWith("/api/session/")) {
+        const sid = decodeURIComponent(pathname.slice("/api/session/".length));
+        let body = "";
+        for await (const chunk of req) body += chunk;
+        try {
+          const state = JSON.parse(body);
+          sessionStates.set(sid, state);
+          return json(res, { ok: true });
+        } catch {
+          res.writeHead(400); return res.end("bad json");
+        }
+      }
 
       // ── Diagram CRUD
       const dm = pathname.match(/^\/api\/diagram\/(.+)$/);
