@@ -10,7 +10,7 @@ export function formatSelectionAsText(sel) {
   lines.push(`<editor-selection type="${safeAttr(sel.type)}" file="${safeAttr(sel.file)}">`);
 
   if (sel.type === "markdown") {
-    lines.push(`Selected text (lines ${sel.startLine}–${sel.endLine}, cols ${sel.startCol}–${sel.endCol}):`);
+    lines.push(`Selected text (lines ${sel.startLine ?? "?"}–${sel.endLine ?? "?"}, cols ${sel.startCol ?? "?"}–${sel.endCol ?? "?"}):`);
     lines.push("");
     const rawText = sel.selectedText ?? "";
     const text = rawText.length > 2000 ? rawText.slice(0, 2000) + "…" : rawText;
@@ -19,7 +19,7 @@ export function formatSelectionAsText(sel) {
     if (sel.headingPath?.length) lines.push(`Location: ${sel.headingPath.join(" > ")}`);
     if (sel.contextBefore) lines.push(`Before: "${sel.contextBefore}"`);
     if (sel.contextAfter) lines.push(`After: "${sel.contextAfter}"`);
-    lines.push(`Document: ${sel.totalLines} lines (position ~${sel.positionPct}%)`);
+    if (sel.totalLines != null) lines.push(`Document: ${sel.totalLines} lines (position ~${sel.positionPct ?? "?"}%)`);
     if (sel.frontmatter && Object.keys(sel.frontmatter).length > 0) {
       const fm = Object.entries(sel.frontmatter)
         .map(([k, v]) => `${k}=${Array.isArray(v) ? `[${v.join(", ")}]` : v}`)
