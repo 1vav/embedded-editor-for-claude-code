@@ -6,14 +6,14 @@ export function formatSelectionAsText(sel) {
   if (!sel) return "";
   const lines = [];
 
-  lines.push(`<editor-selection type="${sel.type}" file="${sel.file}">`);
+  const safeAttr = s => String(s ?? "").replace(/["<>&]/g, "");
+  lines.push(`<editor-selection type="${safeAttr(sel.type)}" file="${safeAttr(sel.file)}">`);
 
   if (sel.type === "markdown") {
     lines.push(`Selected text (lines ${sel.startLine}–${sel.endLine}, cols ${sel.startCol}–${sel.endCol}):`);
     lines.push("");
-    const text = sel.selectedText.length > 2000
-      ? sel.selectedText.slice(0, 2000) + "…"
-      : sel.selectedText;
+    const rawText = sel.selectedText ?? "";
+    const text = rawText.length > 2000 ? rawText.slice(0, 2000) + "…" : rawText;
     for (const l of text.split("\n")) lines.push(`  "${l}"`);
     lines.push("");
     if (sel.headingPath?.length) lines.push(`Location: ${sel.headingPath.join(" > ")}`);

@@ -22,6 +22,9 @@
 //   POST /api/asset                   upload image into assets/ folder
 //   GET  /api/session/:id            get per-session UI state
 //   PUT  /api/session/:id            save per-session UI state
+//   GET  /api/selection             current selection (raw JSON)
+//   PUT  /api/selection             store selection payload
+//   DELETE /api/selection           clear selection
 //   GET  /vendor/*                   static assets
 
 import http  from "http";
@@ -1093,6 +1096,7 @@ export async function startViewerServer(port = DEFAULT_PORT) {
           selectionState = null;
           return json(res, { ok: true });
         }
+        res.writeHead(405); return res.end();
       }
 
       // SPA fallback
