@@ -2113,9 +2113,10 @@ function NoteView({ name, onNavigate, onUserSave }) {
             },
           }),
           EditorView.updateListener.of(update => {
-            if (!update.selectionSet && !update.docChanged) return;
+            if (!update.selectionSet) return;
+            // `name` is safe here: dep array [loading, name] remounts the editor on file change.
             const payload = buildMarkdownSelectionPayload(update.view, name);
-            sendSelection(payload || null);
+            sendSelection(payload);
           }),
           makeDragReorderPlugin(),
         ],
