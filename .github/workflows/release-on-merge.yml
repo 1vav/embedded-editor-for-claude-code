@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: release   # required: makes JWT sub = "environment:release" to match trusted publisher
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0  # full history needed to check existing tags
 
