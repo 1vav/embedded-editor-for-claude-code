@@ -1649,15 +1649,14 @@ function buildTldrawSelectionPayload(editor, fileName) {
 
   const shapes = editor.getSelectedShapes();
   const currentPageId = editor.getCurrentPageId?.() ?? editor.currentPageId;
-  const framePageId = `page:${currentPageId}`;
   const allShapes = editor.getCurrentPageShapes();
 
   const selectedShapes = shapes.map(shape => {
-    const bounds = editor.getShapePageBounds?.(shape.id) ?? editor.getPageBounds?.(shape.id);
+    const bounds = editor.getShapePageBounds?.(shape.id);
     const connectedArrows = getTldrawConnectedArrows(editor, shape.id);
 
     let parentFrameName = null;
-    if (shape.parentId && shape.parentId !== framePageId) {
+    if (shape.parentId && shape.parentId !== currentPageId) {
       const parent = editor.getShape(shape.parentId);
       if (parent?.type === "frame") parentFrameName = parent.props?.name || null;
     }
@@ -1702,7 +1701,7 @@ function TldrawEditor({ name, onUserSave }) {
     if (!tldrawEditor) return;
     const unsubscribe = tldrawEditor.store.listen(() => {
       sendSelection(buildTldrawSelectionPayload(tldrawEditor, name));
-    });
+    }, { source: "user" });
     return () => unsubscribe();
   }, [tldrawEditor, name, sendSelection]);
 
