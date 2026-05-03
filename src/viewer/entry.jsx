@@ -1455,6 +1455,60 @@ function FileTab({ tab, active, onSelect, onClose, onRename }) {
 
 // ─── Diagram Editor ───────────────────────────────────────────────────────────
 
+function buildExcalidrawSelectionPayload(elements, appState, fileName) {
+  const selectedIds = Object.keys(appState.selectedElementIds || {})
+    .filter(id => appState.selectedElementIds[id]);
+  if (!selectedIds.length) return null;
+
+  const elemMap = Object.fromEntries(elements.map(el => [el.id, el]));
+
+  const selectedElements = selectedIds.map(id => {
+    const el = elemMap[id];
+    if (!el) return null;
+
+    const boundElements = [];
+    for (const bound of (el.boundElements || [])) {
+      if (bound.type !== "arrow") continue;
+      const arrow = elemMap[bound.id];
+      if (!arrow) continue;
+      const isOut = arrow.startBinding?.elementId === el.id;
+      const otherEndId = isOut
+        ? arrow.endBinding?.elementId
+        : arrow.startBinding?.elementId;
+      const otherEl = otherEndId ? elemMap[otherEndId] : null;
+      boundElements.push({
+        direction: isOut ? "out" : "in",
+        arrowLabel: arrow.text || "",
+        connectedElementText: otherEl?.text || "",
+      });
+    }
+
+    const frame = el.frameId ? elemMap[el.frameId] : null;
+
+    return {
+      type: el.type,
+      text: el.text || "",
+      x: el.x,
+      y: el.y,
+      width: el.width,
+      height: el.height,
+      boundElements,
+      frameName: frame?.name || frame?.title || null,
+      groupIds: el.groupIds || [],
+      link: el.link || null,
+    };
+  }).filter(Boolean);
+
+  if (!selectedElements.length) return null;
+
+  return {
+    type: "excalidraw",
+    file: fileName,
+    selectedElements,
+    totalElements: elements.length,
+  };
+}
+
 function DiagramEditor({ name, onUserSave, onNavigate }) {
   const T = useT();
   const [data,    setData]    = useState(null);
@@ -1488,12 +1542,14 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
   }, [name, onUserSave]);
 
   const debouncedSave = useDebounced(doSave, 900);
+  const sendSelection = useSendSelection();
 
   // Keep dataRef current on every change (including viewport pan/zoom before debounce fires)
   const handleChange = useCallback((elements, appState, files) => {
     if (dataRef.current) dataRef.current = { ...dataRef.current, elements, appState, files };
     debouncedSave(elements, appState, files);
-  }, [debouncedSave]);
+    sendSelection(buildExcalidrawSelectionPayload(elements, appState, name));
+  }, [debouncedSave, sendSelection, name]);
 
   // Handle Excalidraw element link clicks via the official onLinkOpen prop
   // (window.open interception doesn't work — preview pane blocks non-localhost URLs
