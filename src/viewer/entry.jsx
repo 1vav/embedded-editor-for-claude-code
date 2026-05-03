@@ -1462,6 +1462,15 @@ function buildExcalidrawSelectionPayload(elements, appState, fileName) {
 
   const elemMap = Object.fromEntries(elements.map(el => [el.id, el]));
 
+  // Excalidraw stores shape labels as a bound text element, not in el.text.
+  // Only ExcalidrawTextElement has .text directly; all other shapes use this helper.
+  const labelOf = el => {
+    if (!el) return "";
+    if (el.text) return el.text; // text elements have it directly
+    const textBound = (el.boundElements || []).find(b => b.type === "text");
+    return textBound ? (elemMap[textBound.id]?.text || "") : "";
+  };
+
   const selectedElements = selectedIds.map(id => {
     const el = elemMap[id];
     if (!el) return null;
@@ -1470,7 +1479,7 @@ function buildExcalidrawSelectionPayload(elements, appState, fileName) {
     for (const bound of (el.boundElements || [])) {
       if (bound.type !== "arrow") continue;
       const arrow = elemMap[bound.id];
-      if (!arrow) continue;
+      if (!arrow || arrow.isDeleted) continue;
       const isOut = arrow.startBinding?.elementId === el.id;
       const otherEndId = isOut
         ? arrow.endBinding?.elementId
@@ -1478,8 +1487,8 @@ function buildExcalidrawSelectionPayload(elements, appState, fileName) {
       const otherEl = otherEndId ? elemMap[otherEndId] : null;
       boundElements.push({
         direction: isOut ? "out" : "in",
-        arrowLabel: arrow.text || "",
-        connectedElementText: otherEl?.text || "",
+        arrowLabel: labelOf(arrow),
+        connectedElementText: labelOf(otherEl),
       });
     }
 
@@ -1487,7 +1496,7 @@ function buildExcalidrawSelectionPayload(elements, appState, fileName) {
 
     return {
       type: el.type,
-      text: el.text || "",
+      text: labelOf(el),
       x: el.x,
       y: el.y,
       width: el.width,
