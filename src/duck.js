@@ -76,8 +76,9 @@ export async function runQuery(filePath, sql, cwd = null) {
       const colMeta = stmt.columns();
       const columnTypes = Object.fromEntries(colMeta.map(c => [c.name, c.type?.sql_type ?? c.type?.id ?? "TEXT"]));
       stmt.all((err2, rows) => {
-        if (err2) return reject(err2);
+        if (err2) { stmt.finalize(); return reject(err2); }
         const columns = colMeta.length > 0 ? colMeta.map(c => c.name) : (rows.length > 0 ? Object.keys(rows[0]) : []);
+        stmt.finalize();
         resolve({ columns, rows, rowCount: rows.length, columnTypes });
       });
     });

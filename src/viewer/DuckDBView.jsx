@@ -364,7 +364,7 @@ export function TableView({ name, T, onOpen, onRename }) {
         currentQuery: isQuery ? (sqlText || null) : null,
       }),
     }).catch(() => {});
-  }, [selectedOrigIndices, result, activeTable, name, sqlText]);
+  }, [selectedOrigIndices, result, activeTable, name, sqlText, isQuery]);
 
   // origIndex = position in the unsorted rows array; displayOrigIndices = sorted origIndex list for shift-range
   const handleRowClick = useCallback((origIndex, e, displayOrigIndices) => {
