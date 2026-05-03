@@ -1604,10 +1604,91 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
 
 // ─── tldraw Editor ───────────────────────────────────────────────────────────
 
+function getTldrawConnectedArrows(editor, shapeId) {
+  const allShapes = editor.getCurrentPageShapes();
+  const result = [];
+
+  for (const shape of allShapes) {
+    if (shape.type !== "arrow") continue;
+
+    // tldraw v2: arrow bindings via props (pre-2.1) or via getBindingsFromShape (2.1+)
+    let startId = null;
+    let endId   = null;
+
+    if (shape.props?.start?.type === "binding") startId = shape.props.start.boundShapeId;
+    if (shape.props?.end?.type   === "binding") endId   = shape.props.end.boundShapeId;
+
+    // 2.1+ style
+    if (!startId && !endId && typeof editor.getBindingsFromShape === "function") {
+      const bindings = editor.getBindingsFromShape(shape.id, "arrow") || [];
+      for (const b of bindings) {
+        if (b.props?.terminal === "start") startId = b.toId;
+        if (b.props?.terminal === "end")   endId   = b.toId;
+      }
+    }
+
+    const isOut = startId === shapeId;
+    const isIn  = endId   === shapeId;
+    if (!isOut && !isIn) continue;
+
+    const otherEndId = isOut ? endId : startId;
+    const otherShape = otherEndId ? editor.getShape(otherEndId) : null;
+
+    result.push({
+      direction: isOut ? "out" : "in",
+      arrowLabel: shape.props?.text || "",
+      otherEndText: otherShape?.props?.text || otherShape?.props?.label || "",
+    });
+  }
+  return result;
+}
+
+function buildTldrawSelectionPayload(editor, fileName) {
+  const ids = editor.getSelectedShapeIds();
+  if (!ids.length) return null;
+
+  const shapes = editor.getSelectedShapes();
+  const currentPageId = editor.getCurrentPageId?.() ?? editor.currentPageId;
+  const framePageId = `page:${currentPageId}`;
+  const allShapes = editor.getCurrentPageShapes();
+
+  const selectedShapes = shapes.map(shape => {
+    const bounds = editor.getShapePageBounds?.(shape.id) ?? editor.getPageBounds?.(shape.id);
+    const connectedArrows = getTldrawConnectedArrows(editor, shape.id);
+
+    let parentFrameName = null;
+    if (shape.parentId && shape.parentId !== framePageId) {
+      const parent = editor.getShape(shape.parentId);
+      if (parent?.type === "frame") parentFrameName = parent.props?.name || null;
+    }
+
+    return {
+      type: shape.type,
+      geo: shape.props?.geo ?? null,
+      text: shape.props?.text || shape.props?.label || "",
+      x: bounds?.x ?? shape.x ?? 0,
+      y: bounds?.y ?? shape.y ?? 0,
+      width: bounds?.w ?? shape.props?.w ?? 0,
+      height: bounds?.h ?? shape.props?.h ?? 0,
+      connectedArrows,
+      parentFrameName,
+    };
+  });
+
+  return {
+    type: "tldraw",
+    file: fileName,
+    selectedShapes,
+    totalShapes: allShapes.length,
+  };
+}
+
 function TldrawEditor({ name, onUserSave }) {
   const T = useT();
   const [savedSnap, setSavedSnap] = useState(undefined);
   const [loading,   setLoading]   = useState(true);
+  const [tldrawEditor, setTldrawEditor] = useState(null);
+  const sendSelection = useSendSelection();
 
   useEffect(() => {
     setLoading(true);
@@ -1617,7 +1698,16 @@ function TldrawEditor({ name, onUserSave }) {
     }).catch(() => { setSavedSnap(null); setLoading(false); });
   }, [name]);
 
+  useEffect(() => {
+    if (!tldrawEditor) return;
+    const unsubscribe = tldrawEditor.store.listen(() => {
+      sendSelection(buildTldrawSelectionPayload(tldrawEditor, name));
+    });
+    return () => unsubscribe();
+  }, [tldrawEditor, name, sendSelection]);
+
   const handleMount = useCallback((editor) => {
+    setTldrawEditor(editor);
     if (savedSnap) {
       try {
         if (savedSnap.seed) {
