@@ -66,15 +66,20 @@ export function closeAll() {
   pool.clear();
 }
 
-// Run a SELECT-style query; returns { columns: string[], rows: object[] }
+// Run a SELECT-style query; returns { columns: string[], rows: object[], rowCount: number, columnTypes: {[col]: string} }
 export async function runQuery(filePath, sql, cwd = null) {
   const safeSql = cwd ? injectCwd(sql, filePath, cwd) : sql;
   const db = await getDb(filePath);
   return new Promise((resolve, reject) => {
-    db.all(safeSql, (err, rows) => {
+    db.prepare(safeSql, (err, stmt) => {
       if (err) return reject(err);
-      const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
-      resolve({ columns, rows, rowCount: rows.length });
+      const colMeta = stmt.columns();
+      const columnTypes = Object.fromEntries(colMeta.map(c => [c.name, c.type?.sql_type ?? c.type?.id ?? "TEXT"]));
+      stmt.all((err2, rows) => {
+        if (err2) return reject(err2);
+        const columns = colMeta.length > 0 ? colMeta.map(c => c.name) : (rows.length > 0 ? Object.keys(rows[0]) : []);
+        resolve({ columns, rows, rowCount: rows.length, columnTypes });
+      });
     });
   });
 }

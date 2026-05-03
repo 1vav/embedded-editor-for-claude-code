@@ -342,7 +342,7 @@ export function TableView({ name, T, onOpen, onRename }) {
 
     const schema = (result?.columns || []).map(col => ({
       column: col,
-      type: result?.columnTypes?.[col] || "TEXT",
+      type: result?.columnTypes?.[col] ?? "TEXT",
     }));
 
     const sortedIndices = [...selectedOrigIndices].sort((a, b) => a - b);
@@ -361,21 +361,28 @@ export function TableView({ name, T, onOpen, onRename }) {
         schema,
         selectedRows,
         totalRows: result.rows.length,
-        currentQuery: sqlText || null,
+        currentQuery: isQuery ? (sqlText || null) : null,
       }),
     }).catch(() => {});
   }, [selectedOrigIndices, result, activeTable, name, sqlText]);
 
-  const handleRowClick = useCallback((origIndex, e) => {
+  // origIndex = position in the unsorted rows array; displayOrigIndices = sorted origIndex list for shift-range
+  const handleRowClick = useCallback((origIndex, e, displayOrigIndices) => {
     setSelectedOrigIndices(prev => {
       const next = new Set(prev);
       if (e.metaKey || e.ctrlKey) {
         if (next.has(origIndex)) next.delete(origIndex);
         else next.add(origIndex);
-      } else if (e.shiftKey && lastClickedIndexRef.current !== null) {
-        const lo = Math.min(lastClickedIndexRef.current, origIndex);
-        const hi = Math.max(lastClickedIndexRef.current, origIndex);
-        for (let i = lo; i <= hi; i++) next.add(i);
+      } else if (e.shiftKey && lastClickedIndexRef.current !== null && displayOrigIndices) {
+        const anchorPos = displayOrigIndices.indexOf(lastClickedIndexRef.current);
+        const clickPos  = displayOrigIndices.indexOf(origIndex);
+        if (anchorPos !== -1 && clickPos !== -1) {
+          const lo = Math.min(anchorPos, clickPos);
+          const hi = Math.max(anchorPos, clickPos);
+          for (let i = lo; i <= hi; i++) next.add(displayOrigIndices[i]);
+        } else {
+          next.add(origIndex);
+        }
       } else {
         if (next.size === 1 && next.has(origIndex)) next.clear();
         else { next.clear(); next.add(origIndex); }
@@ -579,7 +586,7 @@ function TableDataView({ result, T, onCellBlur, onAddRow, onOpen, selectedOrigIn
       <tbody>
         {indexedRows.map(({ row, origIndex }) => (
           <tr key={origIndex}
-            onClick={e => onRowClick?.(origIndex, e)}
+            onClick={e => onRowClick?.(origIndex, e, indexedRows.map(r => r.origIndex))}
             style={{
               borderBottom: `1px solid ${T.border}`,
               cursor: "pointer",
