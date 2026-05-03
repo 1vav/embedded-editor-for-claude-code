@@ -677,6 +677,27 @@ function useDarkMode() {
   return dark;
 }
 
+function useSendSelection() {
+  const timerRef = useRef(null);
+  return useCallback((payload) => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (payload) {
+        fetch("/api/selection", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Origin: location.origin },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      } else {
+        fetch("/api/selection", {
+          method: "DELETE",
+          headers: { Origin: location.origin },
+        }).catch(() => {});
+      }
+    }, 300);
+  }, []);
+}
+
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
 function Btn({ children, onClick, accent, small, disabled, title }) {
@@ -1882,8 +1903,78 @@ function makeSlashSource() {
 }
 
 
+function parseFrontmatterFields(docText) {
+  if (!docText.startsWith("---")) return {};
+  const end = docText.indexOf("\n---", 3);
+  if (end === -1) return {};
+  const result = {};
+  for (const line of docText.slice(3, end).split("\n")) {
+    const m = line.match(/^([\w-]+):\s*(.+)/);
+    if (m) result[m[1]] = m[2].trim();
+  }
+  return result;
+}
+
+function buildMarkdownSelectionPayload(view, fileName) {
+  const state = view.state;
+  const sel = state.selection.main;
+  if (sel.from === sel.to) return null;
+
+  const from = Math.min(sel.anchor, sel.head);
+  const to   = Math.max(sel.anchor, sel.head);
+  const selectedText = state.sliceDoc(from, to);
+  if (!selectedText.trim()) return null;
+
+  const fromLine = state.doc.lineAt(from);
+  const toLine   = state.doc.lineAt(to);
+
+  const headingPath = [];
+  let lastLevel = 7;
+  for (let ln = fromLine.number; ln >= 1; ln--) {
+    const lineText = state.doc.line(ln).text;
+    const m = lineText.match(/^(#{1,6})\s+(.+)/);
+    if (m) {
+      const level = m[1].length;
+      if (level < lastLevel) {
+        headingPath.unshift(m[2].trim());
+        lastLevel = level;
+        if (level === 1) break;
+      }
+    }
+  }
+
+  const beforeLines = [];
+  for (let ln = fromLine.number - 1; ln >= 1 && beforeLines.length < 2; ln--) {
+    const t = state.doc.line(ln).text.trim();
+    if (t) beforeLines.unshift(t);
+  }
+
+  const afterLines = [];
+  for (let ln = toLine.number + 1; ln <= state.doc.lines && afterLines.length < 2; ln++) {
+    const t = state.doc.line(ln).text.trim();
+    if (t) afterLines.push(t);
+  }
+
+  return {
+    type: "markdown",
+    file: fileName,
+    selectedText,
+    startLine: fromLine.number,
+    endLine: toLine.number,
+    startCol: from - fromLine.from,
+    endCol: to - toLine.from,
+    headingPath,
+    contextBefore: beforeLines.join(" "),
+    contextAfter: afterLines.join(" "),
+    frontmatter: parseFrontmatterFields(state.doc.toString()),
+    totalLines: state.doc.lines,
+    positionPct: Math.round((fromLine.number / state.doc.lines) * 100),
+  };
+}
+
 function NoteView({ name, onNavigate, onUserSave }) {
   const T = useT();
+  const sendSelection = useSendSelection();
   const [raw,       setRaw]       = useState("");
   const [loading,   setLoading]   = useState(true);
   const [mode,      setMode]      = useState("preview");
@@ -2020,6 +2111,11 @@ function NoteView({ name, onNavigate, onUserSave }) {
               setDropPopupRef.current({ file, x: e.clientX, y: e.clientY, pos });
               return true;
             },
+          }),
+          EditorView.updateListener.of(update => {
+            if (!update.selectionSet && !update.docChanged) return;
+            const payload = buildMarkdownSelectionPayload(update.view, name);
+            sendSelection(payload || null);
           }),
           makeDragReorderPlugin(),
         ],
