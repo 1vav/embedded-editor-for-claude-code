@@ -22,6 +22,9 @@
 //   POST /api/asset                   upload image into assets/ folder
 //   GET  /api/session/:id            get per-session UI state
 //   PUT  /api/session/:id            save per-session UI state
+//   GET  /api/selection             current selection (raw JSON)
+//   PUT  /api/selection             store selection payload
+//   DELETE /api/selection           clear selection
 //   GET  /vendor/*                   static assets
 
 import http  from "http";
@@ -35,6 +38,7 @@ import { renderToSvg, renderToPng } from "./render.js";
 import { DEFAULT_PORT } from "./paths.js";
 import { ROOT, validateName, rewriteLinks, removeLinks, findBacklinks, listSnapshots } from "./workspace.js";
 import { runQuery, runExec, queryCsv, closeOne as duckCloseOne, closeAll as duckCloseAll } from "./duck.js";
+import { formatSelectionAsText } from "./selection-formatter.js";
 
 const PACKAGE_VERSION = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8")
@@ -80,6 +84,9 @@ function queueRender(name, fn) {
 
 // Per-session UI state — keyed by session ID, in-memory only (ephemeral by design)
 const sessionStates = new Map(); // sessionId → SessionState
+
+// volatile, in-memory — cleared on GET ?text=1
+let selectionState = null;
 
 // ── SSE ───────────────────────────────────────────────────────────────────────
 
@@ -1066,6 +1073,30 @@ export async function startViewerServer(port = DEFAULT_PORT) {
             return res.end(buf);
           } catch { /* fall through to SPA */ }
         }
+      }
+
+      // ── Selection context ─────────────────────────────────────────────────
+      if (pathname === "/api/selection") {
+        secHeaders(res);
+        if (method === "GET") {
+          if (url.searchParams.get("text") === "1") {
+            const text = formatSelectionAsText(selectionState);
+            selectionState = null;
+            res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+            return res.end(text);
+          }
+          return json(res, selectionState);
+        }
+        if (method === "PUT") {
+          const body = await readBody(req);
+          selectionState = (body && typeof body === "object") ? body : null;
+          return json(res, { ok: true });
+        }
+        if (method === "DELETE") {
+          selectionState = null;
+          return json(res, { ok: true });
+        }
+        res.writeHead(405); return res.end();
       }
 
       // SPA fallback

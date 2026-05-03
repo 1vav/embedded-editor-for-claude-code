@@ -339,6 +339,22 @@ function mergeSessionStartHook(existing) {
   return hooks;
 }
 
+function buildUserPromptSubmitHook() {
+  const nodeBin  = resolveBin("node");
+  const nodeExec = nodeBin ? `"${nodeBin}"` : "node";
+  // Read port from .claude/launch.json at runtime (written by the SessionStart hook).
+  const portExpr = `try{JSON.parse(require('fs').readFileSync('.claude/launch.json','utf8')).configurations.find(c=>c.name==='Embedded Editor')?.port||3000}catch(e){3000}`;
+  const command = `PORT=$(${nodeExec} -p "${portExpr}" 2>/dev/null || echo 3000); curl -sf --max-time 1 "http://127.0.0.1:\${PORT}/api/selection?text=1" 2>/dev/null || true`;
+  return { type: "command", command, timeout: 5 };
+}
+
+function mergeUserPromptSubmitHook(hooks) {
+  const hook = buildUserPromptSubmitHook();
+  const submits = hooks.UserPromptSubmit || [];
+  if (submits.some(h => h.command === hook.command)) return hooks;
+  return { ...hooks, UserPromptSubmit: [...submits, hook] };
+}
+
 async function writeSettings(settingsPath) {
   let existing = {};
   try {
@@ -348,7 +364,7 @@ async function writeSettings(settingsPath) {
 
   const merged = {
     ...existing,
-    hooks: mergeSessionStartHook(existing),
+    hooks: mergeUserPromptSubmitHook(mergeSessionStartHook(existing)),
     mcpServers: {
       ...(existing.mcpServers || {}),
       "embedded-editor": MCP_SERVER_ENTRY,

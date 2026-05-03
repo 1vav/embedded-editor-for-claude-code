@@ -677,6 +677,27 @@ function useDarkMode() {
   return dark;
 }
 
+function useSendSelection() {
+  const timerRef = useRef(null);
+  return useCallback((payload) => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      if (payload) {
+        fetch("/api/selection", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Origin: location.origin },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      } else {
+        fetch("/api/selection", {
+          method: "DELETE",
+          headers: { Origin: location.origin },
+        }).catch(() => {});
+      }
+    }, 300);
+  }, []);
+}
+
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
 function Btn({ children, onClick, accent, small, disabled, title }) {
@@ -1434,6 +1455,69 @@ function FileTab({ tab, active, onSelect, onClose, onRename }) {
 
 // ─── Diagram Editor ───────────────────────────────────────────────────────────
 
+function buildExcalidrawSelectionPayload(elements, appState, fileName) {
+  const selectedIds = Object.keys(appState.selectedElementIds || {})
+    .filter(id => appState.selectedElementIds[id]);
+  if (!selectedIds.length) return null;
+
+  const elemMap = Object.fromEntries(elements.map(el => [el.id, el]));
+
+  // Excalidraw stores shape labels as a bound text element, not in el.text.
+  // Only ExcalidrawTextElement has .text directly; all other shapes use this helper.
+  const labelOf = el => {
+    if (!el) return "";
+    if (el.text) return el.text; // text elements have it directly
+    const textBound = (el.boundElements || []).find(b => b.type === "text");
+    return textBound ? (elemMap[textBound.id]?.text || "") : "";
+  };
+
+  const selectedElements = selectedIds.map(id => {
+    const el = elemMap[id];
+    if (!el) return null;
+
+    const boundElements = [];
+    for (const bound of (el.boundElements || [])) {
+      if (bound.type !== "arrow") continue;
+      const arrow = elemMap[bound.id];
+      if (!arrow || arrow.isDeleted) continue;
+      const isOut = arrow.startBinding?.elementId === el.id;
+      const otherEndId = isOut
+        ? arrow.endBinding?.elementId
+        : arrow.startBinding?.elementId;
+      const otherEl = otherEndId ? elemMap[otherEndId] : null;
+      boundElements.push({
+        direction: isOut ? "out" : "in",
+        arrowLabel: labelOf(arrow),
+        connectedElementText: labelOf(otherEl),
+      });
+    }
+
+    const frame = el.frameId ? elemMap[el.frameId] : null;
+
+    return {
+      type: el.type,
+      text: labelOf(el),
+      x: el.x,
+      y: el.y,
+      width: el.width,
+      height: el.height,
+      boundElements,
+      frameName: frame?.name || frame?.title || null,
+      groupIds: el.groupIds || [],
+      link: el.link || null,
+    };
+  }).filter(Boolean);
+
+  if (!selectedElements.length) return null;
+
+  return {
+    type: "excalidraw",
+    file: fileName,
+    selectedElements,
+    totalElements: elements.length,
+  };
+}
+
 function DiagramEditor({ name, onUserSave, onNavigate }) {
   const T = useT();
   const [data,    setData]    = useState(null);
@@ -1467,12 +1551,14 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
   }, [name, onUserSave]);
 
   const debouncedSave = useDebounced(doSave, 900);
+  const sendSelection = useSendSelection();
 
   // Keep dataRef current on every change (including viewport pan/zoom before debounce fires)
   const handleChange = useCallback((elements, appState, files) => {
     if (dataRef.current) dataRef.current = { ...dataRef.current, elements, appState, files };
     debouncedSave(elements, appState, files);
-  }, [debouncedSave]);
+    sendSelection(buildExcalidrawSelectionPayload(elements, appState, name));
+  }, [debouncedSave, sendSelection, name]);
 
   // Handle Excalidraw element link clicks via the official onLinkOpen prop
   // (window.open interception doesn't work — preview pane blocks non-localhost URLs
@@ -1518,10 +1604,90 @@ function DiagramEditor({ name, onUserSave, onNavigate }) {
 
 // ─── tldraw Editor ───────────────────────────────────────────────────────────
 
+function getTldrawConnectedArrows(editor, shapeId) {
+  const allShapes = editor.getCurrentPageShapes();
+  const result = [];
+
+  for (const shape of allShapes) {
+    if (shape.type !== "arrow") continue;
+
+    // tldraw v2: arrow bindings via props (pre-2.1) or via getBindingsFromShape (2.1+)
+    let startId = null;
+    let endId   = null;
+
+    if (shape.props?.start?.type === "binding") startId = shape.props.start.boundShapeId;
+    if (shape.props?.end?.type   === "binding") endId   = shape.props.end.boundShapeId;
+
+    // 2.1+ style
+    if (!startId && !endId && typeof editor.getBindingsFromShape === "function") {
+      const bindings = editor.getBindingsFromShape(shape.id, "arrow") || [];
+      for (const b of bindings) {
+        if (b.props?.terminal === "start") startId = b.toId;
+        if (b.props?.terminal === "end")   endId   = b.toId;
+      }
+    }
+
+    const isOut = startId === shapeId;
+    const isIn  = endId   === shapeId;
+    if (!isOut && !isIn) continue;
+
+    const otherEndId = isOut ? endId : startId;
+    const otherShape = otherEndId ? editor.getShape(otherEndId) : null;
+
+    result.push({
+      direction: isOut ? "out" : "in",
+      arrowLabel: shape.props?.text || "",
+      otherEndText: otherShape?.props?.text || otherShape?.props?.label || "",
+    });
+  }
+  return result;
+}
+
+function buildTldrawSelectionPayload(editor, fileName) {
+  const ids = editor.getSelectedShapeIds();
+  if (!ids.length) return null;
+
+  const shapes = editor.getSelectedShapes();
+  const currentPageId = editor.getCurrentPageId?.() ?? editor.currentPageId;
+  const allShapes = editor.getCurrentPageShapes();
+
+  const selectedShapes = shapes.map(shape => {
+    const bounds = editor.getShapePageBounds?.(shape.id);
+    const connectedArrows = getTldrawConnectedArrows(editor, shape.id);
+
+    let parentFrameName = null;
+    if (shape.parentId && shape.parentId !== currentPageId) {
+      const parent = editor.getShape(shape.parentId);
+      if (parent?.type === "frame") parentFrameName = parent.props?.name || null;
+    }
+
+    return {
+      type: shape.type,
+      geo: shape.props?.geo ?? null,
+      text: shape.props?.text || shape.props?.label || "",
+      x: bounds?.x ?? shape.x ?? 0,
+      y: bounds?.y ?? shape.y ?? 0,
+      width: bounds?.w ?? shape.props?.w ?? 0,
+      height: bounds?.h ?? shape.props?.h ?? 0,
+      connectedArrows,
+      parentFrameName,
+    };
+  });
+
+  return {
+    type: "tldraw",
+    file: fileName,
+    selectedShapes,
+    totalShapes: allShapes.length,
+  };
+}
+
 function TldrawEditor({ name, onUserSave }) {
   const T = useT();
   const [savedSnap, setSavedSnap] = useState(undefined);
   const [loading,   setLoading]   = useState(true);
+  const [tldrawEditor, setTldrawEditor] = useState(null);
+  const sendSelection = useSendSelection();
 
   useEffect(() => {
     setLoading(true);
@@ -1531,7 +1697,16 @@ function TldrawEditor({ name, onUserSave }) {
     }).catch(() => { setSavedSnap(null); setLoading(false); });
   }, [name]);
 
+  useEffect(() => {
+    if (!tldrawEditor) return;
+    const unsubscribe = tldrawEditor.store.listen(() => {
+      sendSelection(buildTldrawSelectionPayload(tldrawEditor, name));
+    }, { source: "user" });
+    return () => unsubscribe();
+  }, [tldrawEditor, name, sendSelection]);
+
   const handleMount = useCallback((editor) => {
+    setTldrawEditor(editor);
     if (savedSnap) {
       try {
         if (savedSnap.seed) {
@@ -1882,8 +2057,78 @@ function makeSlashSource() {
 }
 
 
+function parseFrontmatterFields(docText) {
+  if (!docText.startsWith("---")) return {};
+  const end = docText.indexOf("\n---", 3);
+  if (end === -1) return {};
+  const result = {};
+  for (const line of docText.slice(3, end).split("\n")) {
+    const m = line.match(/^([\w-]+):\s*(.+)/);
+    if (m) result[m[1]] = m[2].trim();
+  }
+  return result;
+}
+
+function buildMarkdownSelectionPayload(view, fileName) {
+  const state = view.state;
+  const sel = state.selection.main;
+  if (sel.from === sel.to) return null;
+
+  const from = Math.min(sel.anchor, sel.head);
+  const to   = Math.max(sel.anchor, sel.head);
+  const selectedText = state.sliceDoc(from, to);
+  if (!selectedText.trim()) return null;
+
+  const fromLine = state.doc.lineAt(from);
+  const toLine   = state.doc.lineAt(to);
+
+  const headingPath = [];
+  let lastLevel = 7;
+  for (let ln = fromLine.number; ln >= 1; ln--) {
+    const lineText = state.doc.line(ln).text;
+    const m = lineText.match(/^(#{1,6})\s+(.+)/);
+    if (m) {
+      const level = m[1].length;
+      if (level < lastLevel) {
+        headingPath.unshift(m[2].trim());
+        lastLevel = level;
+        if (level === 1) break;
+      }
+    }
+  }
+
+  const beforeLines = [];
+  for (let ln = fromLine.number - 1; ln >= 1 && beforeLines.length < 2; ln--) {
+    const t = state.doc.line(ln).text.trim();
+    if (t) beforeLines.unshift(t);
+  }
+
+  const afterLines = [];
+  for (let ln = toLine.number + 1; ln <= state.doc.lines && afterLines.length < 2; ln++) {
+    const t = state.doc.line(ln).text.trim();
+    if (t) afterLines.push(t);
+  }
+
+  return {
+    type: "markdown",
+    file: fileName,
+    selectedText,
+    startLine: fromLine.number,
+    endLine: toLine.number,
+    startCol: from - fromLine.from,
+    endCol: to - toLine.from,
+    headingPath,
+    contextBefore: beforeLines.join(" "),
+    contextAfter: afterLines.join(" "),
+    frontmatter: parseFrontmatterFields(state.doc.toString()),
+    totalLines: state.doc.lines,
+    positionPct: Math.round((fromLine.number / state.doc.lines) * 100),
+  };
+}
+
 function NoteView({ name, onNavigate, onUserSave }) {
   const T = useT();
+  const sendSelection = useSendSelection();
   const [raw,       setRaw]       = useState("");
   const [loading,   setLoading]   = useState(true);
   const [mode,      setMode]      = useState("preview");
@@ -2020,6 +2265,12 @@ function NoteView({ name, onNavigate, onUserSave }) {
               setDropPopupRef.current({ file, x: e.clientX, y: e.clientY, pos });
               return true;
             },
+          }),
+          EditorView.updateListener.of(update => {
+            if (!update.selectionSet) return;
+            // `name` is safe here: dep array [loading, name] remounts the editor on file change.
+            const payload = buildMarkdownSelectionPayload(update.view, name);
+            sendSelection(payload);
           }),
           makeDragReorderPlugin(),
         ],

@@ -1,6 +1,6 @@
 // TableView — full-tab view for .duckdb files.
 // TableEmbed — inline embed for ![[name.duckdb]] in notes.
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { EditorView, keymap } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
 import { sql } from "@codemirror/lang-sql";
@@ -197,6 +197,9 @@ export function TableView({ name, T, onOpen, onRename }) {
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const groupPickerRef = useRef(null);
 
+  const [selectedOrigIndices, setSelectedOrigIndices] = useState(() => new Set());
+  const lastClickedIndexRef = useRef(null);
+
   const cmRef     = useRef(null);
   const cmViewRef = useRef(null);
 
@@ -235,6 +238,12 @@ export function TableView({ name, T, onOpen, onRename }) {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }
+
+  // Clear row selection on file/table navigation.
+  useEffect(() => {
+    setSelectedOrigIndices(new Set());
+    lastClickedIndexRef.current = null;
+  }, [name, activeTable]);
 
   // Load table list + meta on mount
   useEffect(() => {
@@ -320,6 +329,68 @@ export function TableView({ name, T, onOpen, onRename }) {
     es.addEventListener("table:changed", handler);
     return () => es.close();
   }, [isQuery, liveSync, sqlText]);
+
+  // Push selected rows to server whenever selection changes.
+  useEffect(() => {
+    if (!selectedOrigIndices.size) {
+      fetch("/api/selection", {
+        method: "DELETE",
+        headers: { Origin: location.origin },
+      }).catch(() => {});
+      return;
+    }
+
+    const schema = (result?.columns || []).map(col => ({
+      column: col,
+      type: result?.columnTypes?.[col] ?? "TEXT",
+    }));
+
+    const sortedIndices = [...selectedOrigIndices].sort((a, b) => a - b);
+    const selectedRows = sortedIndices.map(origIndex => ({
+      rowIndex: origIndex,
+      data: result.rows[origIndex] ?? {},
+    }));
+
+    fetch("/api/selection", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Origin: location.origin },
+      body: JSON.stringify({
+        type: "duckdb",
+        file: name.endsWith(".duckdb") ? name : `${name}.duckdb`,
+        tableName: activeTable || name,
+        schema,
+        selectedRows,
+        totalRows: result.rows.length,
+        currentQuery: isQuery ? (sqlText || null) : null,
+      }),
+    }).catch(() => {});
+  }, [selectedOrigIndices, result, activeTable, name, sqlText, isQuery]);
+
+  // origIndex = position in the unsorted rows array; displayOrigIndices = sorted origIndex list for shift-range
+  const handleRowClick = useCallback((origIndex, e, displayOrigIndices) => {
+    setSelectedOrigIndices(prev => {
+      const next = new Set(prev);
+      if (e.metaKey || e.ctrlKey) {
+        if (next.has(origIndex)) next.delete(origIndex);
+        else next.add(origIndex);
+      } else if (e.shiftKey && lastClickedIndexRef.current !== null && displayOrigIndices) {
+        const anchorPos = displayOrigIndices.indexOf(lastClickedIndexRef.current);
+        const clickPos  = displayOrigIndices.indexOf(origIndex);
+        if (anchorPos !== -1 && clickPos !== -1) {
+          const lo = Math.min(anchorPos, clickPos);
+          const hi = Math.max(anchorPos, clickPos);
+          for (let i = lo; i <= hi; i++) next.add(displayOrigIndices[i]);
+        } else {
+          next.add(origIndex);
+        }
+      } else {
+        if (next.size === 1 && next.has(origIndex)) next.clear();
+        else { next.clear(); next.add(origIndex); }
+      }
+      return next;
+    });
+    lastClickedIndexRef.current = origIndex;
+  }, []);
 
   const ghost = (label, active, onClick, title) => (
     <span onClick={onClick} title={title} style={{
@@ -431,7 +502,8 @@ export function TableView({ name, T, onOpen, onRename }) {
           {error && <div style={{ padding: "10px 14px", color: T.red || "#f87171", fontFamily: T.mono, fontSize: 12 }}>{error}</div>}
           {loading && <div style={{ padding: "10px 14px", color: T.muted, fontFamily: T.mono, fontSize: 12 }}>Loading…</div>}
           {!loading && dataView === "table" && (
-            <TableDataView result={result} T={T} onCellBlur={handleCellBlur} onAddRow={handleAddRow} onOpen={onOpen} />
+            <TableDataView result={result} T={T} onCellBlur={handleCellBlur} onAddRow={handleAddRow} onOpen={onOpen}
+              selectedOrigIndices={selectedOrigIndices} onRowClick={handleRowClick} />
           )}
           {!loading && dataView === "cards" && (
             <CardDataView result={result} T={T} onCellBlur={handleCellBlur} onAddRow={handleAddRow} groupBy={effectiveGroupBy} />
@@ -464,7 +536,7 @@ function sortRows(rows, col, dir) {
   });
 }
 
-function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
+function TableDataView({ result, T, onCellBlur, onAddRow, onOpen, selectedOrigIndices, onRowClick }) {
   const { columns, rows } = result;
   const [sortCol, setSortCol] = useState(null);
   const [sortDir, setSortDir] = useState("asc"); // "asc" | "desc"
@@ -513,7 +585,14 @@ function TableDataView({ result, T, onCellBlur, onAddRow, onOpen }) {
       </thead>
       <tbody>
         {indexedRows.map(({ row, origIndex }) => (
-          <tr key={origIndex} style={{ borderBottom: `1px solid ${T.border}` }}>
+          <tr key={origIndex}
+            onClick={e => onRowClick?.(origIndex, e, indexedRows.map(r => r.origIndex))}
+            style={{
+              borderBottom: `1px solid ${T.border}`,
+              cursor: "pointer",
+              background: selectedOrigIndices?.has(origIndex) ? T.accent + "22" : undefined,
+              userSelect: "none",
+            }}>
             {columns.map(c => {
               const val = String(row[c] ?? "");
               const isLink = WIKILINK_RE.test(val) || WS_EXT_RE.test(val);
