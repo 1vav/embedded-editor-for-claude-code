@@ -10,6 +10,7 @@ import MarkdownIt from "markdown-it";
 import { TableView, TableEmbed } from "./DuckDBView.jsx";
 import { PdfView } from "./PdfView.jsx";
 import { CsvView } from "./CsvView.jsx";
+import { MarpView } from "./MarpView.jsx";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
@@ -2190,6 +2191,16 @@ function NoteView({ name, onNavigate, onUserSave }) {
     };
   }, [name]);
 
+  // Reset mode when switching between notes
+  useEffect(() => {
+    setMode("preview");
+  }, [name]);
+
+  // Auto-switch to slides mode if frontmatter declares marp: true
+  useEffect(() => {
+    if (!loading && noteFm?.marp) setMode("slides");
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const doSave = useCallback(async (text) => {
     await api.saveNote(name, text);
     onUserSave?.(name, "note");
@@ -2442,6 +2453,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
       {/* Note toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px",
         borderBottom: `1px solid ${T.border}`, flexShrink: 0, background: T.bg }}>
+        {noteFm?.marp && (
+          <Ghost onClick={() => switchMode("slides")} active={mode === "slides"} small>slides</Ghost>
+        )}
         <Ghost onClick={() => switchMode("preview")} active={mode === "preview"} small>preview</Ghost>
         <Ghost onClick={() => switchMode("edit")} active={mode === "edit"} small>edit</Ghost>
         <div style={{ flex: 1 }} />
@@ -2467,10 +2481,15 @@ function NoteView({ name, onNavigate, onUserSave }) {
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Marp slide viewer — mounts only when mode === "slides" */}
+        {mode === "slides" && noteFm?.marp && (
+          <MarpView raw={raw} T={T} />
+        )}
         {/* Relative wrapper so both panes can be absolutely stacked.
             visibility:hidden (not display:none) keeps layout intact so scrollHeight
             and scrollTop work correctly even when the pane is not active. */}
-        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <div style={{ flex: 1, position: "relative", overflow: "hidden",
+          display: mode === "slides" ? "none" : undefined }}>
           <div ref={cmContainerRef} style={{
             position: "absolute", inset: 0, overflow: "hidden",
             visibility: mode === "edit" ? "visible" : "hidden",
