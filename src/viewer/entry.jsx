@@ -10,6 +10,7 @@ import MarkdownIt from "markdown-it";
 import { TableView, TableEmbed } from "./DuckDBView.jsx";
 import { PdfView } from "./PdfView.jsx";
 import { CsvView } from "./CsvView.jsx";
+import { MarpView } from "./MarpView.jsx";
 
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
@@ -1142,6 +1143,18 @@ const DuckBrandIcon = ({ size = 14 }) => (
   </svg>
 );
 
+function MarpBrandIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="2" y="3" width="20" height="14" rx="2" stroke="currentColor" strokeWidth="1.8" fill="none"/>
+      <line x1="6" y1="8" x2="18" y2="8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="6" y1="12" x2="14" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="10" y1="17" x2="10" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+      <line x1="7" y1="20" x2="17" y2="20" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  );
+}
+
 function BrandMark({ onHome }) {
   const T = useT();
   const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
@@ -1168,6 +1181,10 @@ function BrandMark({ onHome }) {
       {dot}
       <span title="DuckDB tables" style={{ display: "flex" }}>
         <DuckBrandIcon size={14} />
+      </span>
+      {dot}
+      <span title="Marp slides" style={{ display: "flex", color: "#818cf8" }}>
+        <MarpBrandIcon size={14} />
       </span>
     </div>
   );
@@ -2174,6 +2191,16 @@ function NoteView({ name, onNavigate, onUserSave }) {
     };
   }, [name]);
 
+  // Reset mode when switching between notes
+  useEffect(() => {
+    setMode("preview");
+  }, [name]);
+
+  // Auto-switch to slides mode if frontmatter declares marp: true
+  useEffect(() => {
+    if (!loading && noteFm?.marp) setMode("slides");
+  }, [loading]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const doSave = useCallback(async (text) => {
     await api.saveNote(name, text);
     onUserSave?.(name, "note");
@@ -2426,6 +2453,9 @@ function NoteView({ name, onNavigate, onUserSave }) {
       {/* Note toolbar */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 14px",
         borderBottom: `1px solid ${T.border}`, flexShrink: 0, background: T.bg }}>
+        {noteFm?.marp && (
+          <Ghost onClick={() => switchMode("slides")} active={mode === "slides"} small>slides</Ghost>
+        )}
         <Ghost onClick={() => switchMode("preview")} active={mode === "preview"} small>preview</Ghost>
         <Ghost onClick={() => switchMode("edit")} active={mode === "edit"} small>edit</Ghost>
         <div style={{ flex: 1 }} />
@@ -2451,10 +2481,15 @@ function NoteView({ name, onNavigate, onUserSave }) {
       </div>
 
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+        {/* Marp slide viewer — mounts only when mode === "slides" */}
+        {mode === "slides" && noteFm?.marp && (
+          <MarpView raw={raw} T={T} />
+        )}
         {/* Relative wrapper so both panes can be absolutely stacked.
             visibility:hidden (not display:none) keeps layout intact so scrollHeight
             and scrollTop work correctly even when the pane is not active. */}
-        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <div style={{ flex: 1, position: "relative", overflow: "hidden",
+          display: mode === "slides" ? "none" : undefined }}>
           <div ref={cmContainerRef} style={{
             position: "absolute", inset: 0, overflow: "hidden",
             visibility: mode === "edit" ? "visible" : "hidden",
@@ -2706,9 +2741,11 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ display: "flex" }}><CodeBrandIcon size={30} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#facc15" }}><DuckBrandIcon size={30} /></span>
+        <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
+        <span style={{ display: "flex", color: "#818cf8" }}><MarpBrandIcon size={30} /></span>
       </div>
       <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
-      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · wikilinks</div>
+      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
           <div style={{ color: T.muted, fontSize: 9, letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>RECENT</div>

@@ -9,6 +9,9 @@ import { renderToPngBase64 } from "./render.js";
 import { ROOT, resolveFile as wsResolveFile, rewriteLinks, findBacklinks, listSnapshots } from "./workspace.js";
 import { derivePort } from "./paths.js";
 import { runQuery, runExec } from "./duck.js";
+import { execFile } from "child_process";
+import { promisify } from "util";
+const execFileAsync = promisify(execFile);
 
 const HIST_DIR = path.join(ROOT, ".excalidraw-history");
 
@@ -231,6 +234,52 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
       const filePath = wsResolveFile(name, ".md");
       try { await fs.unlink(filePath); return { content: [{ type: "text", text: `Deleted ${name}.md` }] }; }
       catch { return { content: [{ type: "text", text: `Could not delete — ${name}.md may not exist.` }] }; }
+    }
+  );
+
+  // ── Slides: create ──────────────────────────────────────────────────────────
+  server.tool(
+    "create_slides",
+    "Create a new Marp slide deck (.md with marp: true frontmatter). Opens in slides mode in the viewer. Use write_note to update content afterward.",
+    {
+      name:  z.string().describe("Slide deck name (without .md extension)"),
+      title: z.string().optional().describe("Title for the first slide"),
+    },
+    async ({ name, title }) => {
+      const filePath = wsResolveFile(name, ".md");
+      try { await fs.access(filePath); return { content: [{ type: "text", text: `${name}.md already exists. Use write_note to update it.` }] }; } catch {}
+      const t = title || name;
+      const content = `---\nmarp: true\ntheme: default\npaginate: true\n---\n\n# ${t}\n\n---\n\n## Slide 2\n\nAdd your content here.\n`;
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, content, "utf8");
+      return { content: [{ type: "text", text: `Created slide deck ${name}.md — open it in the viewer to see the slides preview, or use write_note to update content.` }] };
+    }
+  );
+
+  // ── Slides: export ──────────────────────────────────────────────────────────
+  server.tool(
+    "export_slides",
+    "Export a Marp slide deck (.md) to HTML, PDF, or PPTX using marp-cli (via npx — no global install required). Output file lands next to the source .md.",
+    {
+      name:   z.string().describe("Slide deck name (without .md extension)"),
+      format: z.enum(["html", "pdf", "pptx"]).describe("Export format"),
+    },
+    async ({ name, format }) => {
+      const filePath = wsResolveFile(name, ".md");
+      try { await fs.access(filePath); } catch {
+        return { content: [{ type: "text", text: `${name}.md not found. Run list_notes to check.` }] };
+      }
+      const outputPath = filePath.replace(/\.md$/, `.${format}`);
+      try {
+        await execFileAsync(
+          "npx",
+          ["-y", "@marp-team/marp-cli@latest", filePath, `--${format}`, "-o", outputPath],
+          { timeout: 120_000, cwd: ROOT }
+        );
+        return { content: [{ type: "text", text: `Exported ${name}.md → ${outputPath}` }] };
+      } catch (err) {
+        return { content: [{ type: "text", text: `Export failed: ${err.message}` }] };
+      }
     }
   );
 
@@ -689,6 +738,8 @@ Other tools:
   - list_history      — list saved diagram versions
   - restore_snapshot  — restore a diagram to a saved version
   - list_tldraw / read_tldraw — inspect tldraw canvases (browser-only; edit at http://127.0.0.1:${derivePort(ROOT)})
+  - create_slides — scaffold a Marp slide deck (.md with marp: true); viewer auto-opens in slides mode
+  - export_slides — export a Marp .md to html / pdf / pptx via npx marp-cli
 
 Element schema (minimum): { id, type, x, y, width, height }. Types: rectangle, ellipse, diamond, arrow, line, text, freedraw.`,
     },

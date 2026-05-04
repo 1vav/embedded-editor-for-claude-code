@@ -1,6 +1,6 @@
 {
   "name": "embedded-editor-for-claude-code",
-  "version": "1.4.0",
+  "version": "1.4.5",
   "description": "Embedded visual workspace for Claude Code — Excalidraw diagrams (with MCP tools + inline PNG), tldraw canvases, and Markdown notes, all linked by wikilinks",
   "license": "MIT",
   "author": {
@@ -86,6 +86,7 @@
     "@codemirror/legacy-modes": "^6.5.2",
     "@eslint/js": "^9.39.4",
     "@excalidraw/excalidraw": "^0.18.0",
+    "@marp-team/marp-core": "^4.3.0",
     "@tldraw/tldraw": "^4.5.9",
     "codemirror": "^6.0.2",
     "dompurify": "^3.2.6",
