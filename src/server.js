@@ -274,7 +274,7 @@ For line/arrow: add points as [[0,0],[dx,dy],...] relative to (x,y).`,
         await execFileAsync(
           "npx",
           ["-y", "@marp-team/marp-cli@latest", filePath, `--${format}`, "-o", outputPath],
-          { shell: true, timeout: 120_000, cwd: ROOT }
+          { timeout: 120_000, cwd: ROOT }
         );
         return { content: [{ type: "text", text: `Exported ${name}.md → ${outputPath}` }] };
       } catch (err) {
