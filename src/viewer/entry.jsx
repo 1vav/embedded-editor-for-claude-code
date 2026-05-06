@@ -128,6 +128,7 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     ".cm-md-link":     { color: N.blue },
     ".cm-md-wikilink": { color: N.blue, cursor: "pointer" },
     ".cm-md-hr":       { display: "block", borderTop: `1px solid ${N.border}`, margin: "0.5em 0", height: "0", width: "100%" },
+    ".cm-md-task-done": { textDecoration: "line-through", opacity: "0.55" },
     // Slash-command autocomplete popup
     ".cm-tooltip":                                    { background: N.surface, border: `1px solid ${N.border2}`, borderRadius: "8px", boxShadow: "0 8px 28px rgba(0,0,0,.45)", overflow: "hidden", padding: "3px 0" },
     ".cm-tooltip-autocomplete ul":                    { fontFamily: T.mono, margin: 0, padding: 0, listStyle: "none" },
@@ -144,6 +145,7 @@ function makeNoteEditorTheme(T, S = NOTE_STYLES[0], C = null) {
     ".cm-line:hover .ee-drag-handle-btn, .cm-line.ee-handle-hover .ee-drag-handle-btn": { color: N.muted },
     ".ee-drag-handle-btn.ee-active": { color: N.accent, cursor: "grabbing" },
     ".ee-drag-line":            { position: "absolute", left: "20px", right: "20px", height: "2px", background: N.accent, pointerEvents: "none", display: "none", zIndex: "10", borderRadius: "1px" },
+    ".ee-block-highlight":      { position: "absolute", left: "4px", right: "4px", background: N.accent + "12", pointerEvents: "none", zIndex: "1", borderRadius: "3px", borderLeft: `2px solid ${N.accent}44` },
   }, { dark: N.isDark });
 }
 
@@ -219,6 +221,17 @@ function buildMarkdownDecorations(view) {
       }
     },
   });
+
+  // Checked task items: strike through only the text content (decoration is tied to [x] context).
+  // Cutting text out of a [x] line removes the decoration — the strikethrough doesn't travel with the text.
+  for (let lineNum = state.doc.lineAt(vFrom).number; lineNum <= state.doc.lineAt(vTo).number; lineNum++) {
+    const line = state.doc.line(lineNum);
+    const tm = line.text.match(/^([ \t]*[-*+] )\[x\] /i);
+    if (tm && !onCursorLine(line.from, line.to)) {
+      const textFrom = line.from + tm[0].length;
+      if (textFrom < line.to) markDecs.push({ from: textFrom, to: line.to, dec: Decoration.mark({ class: "cm-md-task-done" }) });
+    }
+  }
 
   // Wikilinks via regex (not in lezer-markdown AST)
   const text = state.doc.sliceString(vFrom, vTo);
@@ -376,7 +389,7 @@ function parseSegments(raw) {
 // Skips replacements inside inline code spans or fenced code blocks.
 // Also normalises raw <a data-wl> HTML that Claude sometimes writes directly — markdown-it
 // has html:false so those would otherwise be escaped to visible text.
-function renderMd(text) {
+function renderMd(text, taskStartIdx = 0) {
   text = text.replace(/<a\s+data-wl="([^"]*)"[^>]*>([^<]*)<\/a>/g, (_, name, label) => {
     const n = name.replace(/&quot;/g, '"').trim();
     const l = label.trim();
@@ -409,10 +422,82 @@ function renderMd(text) {
     /\[\[([^\]]+)\]\]/g,
     (n) => `<a data-wl="${esc(n.trim())}" href="#">${n.trim()}</a>`
   );
-  return DOMPurify.sanitize(md.render(pre2), { ADD_ATTR: ["data-wl", "data-external", "target", "rel"] });
+  let html = md.render(pre2);
+  let taskIdx = taskStartIdx;
+  // Convert GFM-style task list items (- [ ] / - [x]) to interactive checkboxes.
+  // Handles both tight lists (<li>[x] text) and loose lists (<li>\n<p>[x] text).
+  html = html.replace(/<li>(\n?<p>)?\[([x ])\] /gi, (_, pTag, check) => {
+    const idx = taskIdx++;
+    const done = check.toLowerCase() === "x";
+    return `<li class="task-item${done ? " task-done" : ""}">${pTag ?? ""}<input type="checkbox" data-task-idx="${idx}"${done ? " checked" : ""}><span class="task-label"> `;
+  });
+  // Close the task-label span before any nested list or at the end of the inline content.
+  // Tight lists: <span class="task-label"> TEXT \n<ul>  →  </span>\n<ul>
+  // Loose lists: <span class="task-label"> TEXT </p>     →  </span></p>
+  // Flat items:  <span class="task-label"> TEXT </li>    →  </span></li>
+  html = html.replace(/<span class="task-label">([^]*?)(<\/p>|(?=\n?<(?:ul|ol)[> ]))/g,
+    (_, content, closer) => `<span class="task-label">${content}${closer === "</p>" ? "</span></p>" : "</span>"}`
+  );
+  return DOMPurify.sanitize(html, { ADD_ATTR: ["data-wl", "data-external", "target", "rel", "data-task-idx"], ADD_TAGS: ["input"] });
 }
 
 function esc(s) { return String(s).replace(/"/g, "&quot;"); }
+
+// Toggle the Nth task-list item (0-indexed). If checking, moves item to end of its sibling group.
+// Indented items move within their indent level only; top-level items move as a block (with children).
+function applyTaskToggle(raw, taskIdx) {
+  const taskLineRe = /^([ \t]*[-*+] )\[([ xX])\] (.*)/;
+  const lines = raw.split("\n");
+  let taskCount = 0, targetLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (taskLineRe.test(lines[i])) {
+      if (taskCount++ === taskIdx) { targetLine = i; break; }
+    }
+  }
+  if (targetLine < 0) return raw;
+
+  const m = lines[targetLine].match(taskLineRe);
+  const wasChecked = m[2].toLowerCase() === "x";
+  const nowChecked = !wasChecked;
+  lines[targetLine] = `${m[1]}[${nowChecked ? "x" : " "}] ${m[3]}`;
+
+  if (!nowChecked) return lines.join("\n"); // unchecking: just toggle, no reorder
+
+  const getIndent = (i) => (lines[i]?.match(/^([ \t]*)/) ?? ["", ""])[1].length;
+  const isListStart = (i) => i >= 0 && i < lines.length && /^[ \t]*[-*+] /.test(lines[i]);
+  const targetIndent = getIndent(targetLine);
+
+  if (targetIndent > 0) {
+    // Indented: move only this item within its same-indent siblings
+    let gStart = targetLine, gEnd = targetLine;
+    while (gStart > 0 && isListStart(gStart - 1) && getIndent(gStart - 1) === targetIndent) gStart--;
+    while (gEnd < lines.length - 1 && isListStart(gEnd + 1) && getIndent(gEnd + 1) === targetIndent) gEnd++;
+    if (gStart < gEnd) {
+      const moved = lines.splice(targetLine, 1)[0];
+      lines.splice(gEnd, 0, moved); // gEnd adjusted: after splice, old gEnd is at gEnd-1, insert after → gEnd
+    }
+  } else {
+    // Top-level: find the item's block (item line + indented children), move block to end of list
+    let blockEnd = targetLine;
+    while (blockEnd + 1 < lines.length && lines[blockEnd + 1].trim() &&
+           !(getIndent(blockEnd + 1) <= targetIndent && isListStart(blockEnd + 1))) {
+      blockEnd++;
+    }
+    // Find end of the whole top-level list section
+    let listEnd = blockEnd;
+    for (let s = blockEnd + 1; s < lines.length && lines[s].trim(); s++) {
+      if (isListStart(s) || getIndent(s) > 0) listEnd = s; else break;
+    }
+    if (targetLine <= listEnd && blockEnd < listEnd) {
+      const blockSize = blockEnd - targetLine + 1;
+      const movedBlock = lines.splice(targetLine, blockSize);
+      const newListEnd = listEnd - blockSize; // list end shifted left after splice
+      lines.splice(newListEnd + 1, 0, ...movedBlock);
+    }
+  }
+
+  return lines.join("\n");
+}
 
 // Returns { fm: Object|null, body: string } where body has the frontmatter block removed.
 function parseFrontmatter(text) {
@@ -2163,6 +2248,8 @@ function NoteView({ name, onNavigate, onUserSave }) {
   const cmContainerRef = useRef(null);  // CM6 mount point
   const cmViewRef      = useRef(null);  // CM6 EditorView instance
   const noteThemeComp  = useRef(new Compartment());
+  const rawRef         = useRef(raw);
+  useEffect(() => { rawRef.current = raw; }, [raw]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2349,6 +2436,19 @@ function NoteView({ name, onNavigate, onUserSave }) {
   }, [mode, name]);
 
   const handleClick = useCallback((e) => {
+    const cb = e.target.closest("input[type='checkbox'][data-task-idx]");
+    if (cb) {
+      e.preventDefault();
+      const idx = parseInt(cb.dataset.taskIdx, 10);
+      const newRaw = applyTaskToggle(rawRef.current, idx);
+      setRaw(newRaw);
+      if (cmViewRef.current) {
+        const cur = cmViewRef.current.state.doc.toString();
+        if (cur !== newRaw) cmViewRef.current.dispatch({ changes: { from: 0, to: cur.length, insert: newRaw } });
+      }
+      doSave(newRaw);
+      return;
+    }
     const copyBtn = e.target.closest(".copy-btn");
     if (copyBtn) {
       const pre = copyBtn.closest(".code-block")?.querySelector("pre");
@@ -2503,12 +2603,18 @@ function NoteView({ name, onNavigate, onUserSave }) {
             <div onClick={handleClick} onContextMenu={handleContextMenu} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
               <style>{noteStyles}</style>
               <FrontmatterPanel fm={noteFm} T={N} />
-              {segs.map((seg) =>
-                seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
-                : seg.type === "tldraw" ? <TldrawEmbed key={`tldraw:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} />
-                : seg.type === "duckdb" ? <TableEmbed key={`duckdb:${seg.name}`} name={seg.name} T={N} onOpen={onNavigate} onDelete={handleEmbedDelete} />
-                : <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text) }} />
-              )}
+              {segs.reduce((acc, seg) => {
+                const offset = acc.off;
+                const count = seg.type === "text" ? (seg.text.match(/^[ \t]*[-*+] \[[ xX]\] /gm) || []).length : 0;
+                acc.els.push(
+                  seg.type === "diagram" ? <DiagramEmbed key={`diagram:${seg.name}`} name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} /> :
+                  seg.type === "tldraw"  ? <TldrawEmbed  key={`tldraw:${seg.name}`}  name={seg.name} onOpen={onNavigate} onDelete={handleEmbedDelete} /> :
+                  seg.type === "duckdb"  ? <TableEmbed   key={`duckdb:${seg.name}`}  name={seg.name} T={N} onOpen={onNavigate} onDelete={handleEmbedDelete} /> :
+                  <div key={`text:${seg.text?.slice(0, 40)}`} className="note-body" dangerouslySetInnerHTML={{ __html: renderMd(seg.text, offset) }} />
+                );
+                acc.off += count;
+                return acc;
+              }, { els: [], off: 0 }).els}
             </div>
           </div>
         </div>
@@ -2721,7 +2827,12 @@ function makeNoteStyles(T, S = NOTE_STYLES[0], C = null) {
   .note-body video { max-width: 100%; height: auto; border-radius: 6px; display: block; margin: 0.75em 0; }
   .note-body audio { width: 100%; margin: 0.75em 0; display: block; }
   .note-body del { color: ${N.muted}; }
-  .note-body input[type="checkbox"] { margin-right: 5px; }
+  .note-body input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid ${N.border2}; border-radius: 3px; background: ${N.surface}; cursor: pointer; vertical-align: -2px; margin-right: 6px; flex-shrink: 0; transition: background 0.12s, border-color 0.12s; }
+  .note-body input[type="checkbox"]:checked { background: ${N.accent}; border-color: ${N.accent}; background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 4l3 3 5-6' stroke='white' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-size: 10px 8px; background-position: center; background-repeat: no-repeat; }
+  .note-body input[type="checkbox"]:hover { border-color: ${N.accent}; }
+  .note-body li.task-item { list-style: none; margin-left: -1.2em; }
+  .note-body li.task-done > span.task-label,
+  .note-body li.task-done > p > span.task-label { color: ${N.muted}; text-decoration: line-through; }
 `;}
 
 // ─── Empty State ──────────────────────────────────────────────────────────────
