@@ -18,6 +18,28 @@ let activeDrag = null;
 // activeDrag shape when non-null:
 // { view, groupIdx, group, fromBlockIdx, insertBeforeIdx, lineEl, handleBtn }
 
+// ── Block hover highlight ─────────────────────────────────────────────────────
+let _highlightEl = null;
+
+function showBlockHighlight(view, block) {
+  if (!_highlightEl) {
+    _highlightEl = document.createElement("div");
+    _highlightEl.className = "ee-block-highlight";
+  }
+  _highlightEl.remove();
+  view.dom.appendChild(_highlightEl);
+
+  const firstLB = view.lineBlockAt(block.from);
+  const lastLB  = view.lineBlockAt(Math.max(block.from, block.to - 1));
+  const scrollTop = view.scrollDOM.scrollTop;
+  _highlightEl.style.top    = `${firstLB.top - scrollTop}px`;
+  _highlightEl.style.height = `${lastLB.top + lastLB.height - firstLB.top}px`;
+}
+
+function hideBlockHighlight() {
+  _highlightEl?.remove();
+}
+
 export function buildReorderTransaction(state, group, fromBlockIdx, insertBeforeIdx) {
   // No-op checks
   if (insertBeforeIdx === fromBlockIdx || insertBeforeIdx === fromBlockIdx + 1) return null;
@@ -101,9 +123,16 @@ class DragHandleWidget extends WidgetType {
     // hiding the handle before the user can click it. We fix this with JS.
     btn.addEventListener("mouseenter", () => {
       btn.closest(".cm-line")?.classList.add("ee-handle-hover");
+      // Show a subtle highlight over the block extent being moved
+      const groups = parseBlocks(view.state);
+      const block  = groups[this.groupIdx]?.blocks[this.blockIdx];
+      if (block) showBlockHighlight(view, block);
     });
     btn.addEventListener("mouseleave", () => {
-      if (!activeDrag) btn.closest(".cm-line")?.classList.remove("ee-handle-hover");
+      if (!activeDrag) {
+        hideBlockHighlight();
+        btn.closest(".cm-line")?.classList.remove("ee-handle-hover");
+      }
     });
 
     // Outer wrapper: zero width, overflow visible so the btn floats left
@@ -148,6 +177,7 @@ function cancelDrag() {
   if (!activeDrag) return;
   const { lineEl, handleBtn } = activeDrag;
   lineEl.remove();
+  hideBlockHighlight();
   if (handleBtn) {
     handleBtn.classList.remove("ee-active");
     // Also clear the JS-driven hover class now that dragging is done
