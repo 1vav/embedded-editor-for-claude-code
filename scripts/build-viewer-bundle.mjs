@@ -13,6 +13,7 @@ import { build } from "esbuild";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createReadStream, createWriteStream } from "fs";
+import { copyFile, readFile } from "fs/promises";
 import { pipeline } from "stream/promises";
 import { createGzip, createBrotliCompress, constants as zlibConstants } from "zlib";
 
@@ -52,6 +53,22 @@ await build({
 });
 
 console.log(`Bundle done in ${((Date.now() - t0) / 1000).toFixed(1)}s  →  vendor/viewer.js + vendor/viewer.css`);
+
+// ── Copy the pdf.js worker into vendor/ ──────────────────────────────────────
+// pdf.js cannot run its parser on the main thread under our CSP (the fallback
+// "fake worker" uses eval, which script-src forbids), so it needs a real worker
+// served from /vendor/. The pdfjs version is in the filename so an upgrade yields
+// a fresh URL (no stale immutable-cache hit); PdfView builds the same URL from
+// pdfjsLib.version. Copied as .js (not .mjs) so the server's vendor MIME map
+// serves it as application/javascript and it gets gz/br compressed below.
+{
+  const pdfjsPkg = JSON.parse(await readFile(path.join(root, "node_modules/pdfjs-dist/package.json"), "utf8"));
+  await copyFile(
+    path.join(root, "node_modules/pdfjs-dist/build/pdf.worker.min.mjs"),
+    path.join(root, "vendor", `pdf.worker.${pdfjsPkg.version}.min.js`),
+  );
+  console.log(`Copied pdf.js worker  →  vendor/pdf.worker.${pdfjsPkg.version}.min.js`);
+}
 
 if (noCompress) process.exit(0);
 

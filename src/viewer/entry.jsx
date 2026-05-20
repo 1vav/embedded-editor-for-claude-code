@@ -1208,6 +1208,15 @@ const CodeBrandIcon = ({ size = 13 }) => (
   </svg>
 );
 
+// HTML5 shield silhouette
+const HtmlBrandIcon = ({ size = 13 }) => (
+  <svg width={size} height={size} viewBox="0 0 20 20" aria-label="HTML page">
+    <path d="M3 2 L4.5 17 L10 18.5 L15.5 17 L17 2Z" fill="#e34f26"/>
+    <path d="M10 3.5 L10 17 L14 15.9 L15.1 3.5Z" fill="#ef652a"/>
+    <text x="10" y="13.2" textAnchor="middle" fill="#fff" fontSize="7.5" fontFamily="monospace" fontWeight="700">5</text>
+  </svg>
+);
+
 // tldraw official favicon — tldraw/tldraw apps/dotcom/client/public/favicon.svg
 const TldrawBrandIcon = ({ size = 13, isDark }) => (
   <svg width={size} height={size} viewBox="0 0 33 33" fill="none" aria-label="tldraw">
@@ -1242,34 +1251,20 @@ function MarpBrandIcon({ size = 14 }) {
 
 function BrandMark({ onHome }) {
   const T = useT();
-  const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
+  const [hover, setHover] = useState(false);
   return (
     <div onClick={onHome} title="Home"
-      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "center", flexShrink: 0,
         paddingRight: 8, borderRight: `1px solid ${T.border2}`,
-        cursor: onHome ? "pointer" : "default", opacity: 1 }}>
-      <span title="Markdown notes" style={{ display: "flex", color: T.text, opacity: 0.8 }}>
-        <MarkdownBrandIcon size={13} />
-      </span>
-      {dot}
-      <span title="Excalidraw diagrams" style={{ display: "flex" }}>
-        <ExcalidrawBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="tldraw diagrams" style={{ display: "flex" }}>
-        <TldrawBrandIcon size={14} isDark={T.isDark} />
-      </span>
-      {dot}
-      <span title="Code editor" style={{ display: "flex" }}>
-        <CodeBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="DuckDB tables" style={{ display: "flex" }}>
-        <DuckBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="Marp slides" style={{ display: "flex", color: "#818cf8" }}>
-        <MarpBrandIcon size={14} />
+        cursor: onHome ? "pointer" : "default" }}>
+      <span style={{ display: "flex", color: hover ? T.text : T.muted, transition: "color .1s" }}>
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-label="Home">
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+          <path d="M9.5 21v-6h5v6" />
+        </svg>
       </span>
     </div>
   );
@@ -2681,7 +2676,7 @@ function NoteView({ name, onNavigate, onUserSave }) {
 
 // ─── Code Editor ──────────────────────────────────────────────────────────────
 
-function CodeEditor({ name, onUserSave }) {
+function CodeEditor({ name, onUserSave, hideHeader }) {
   const T = useT();
   const containerRef = useRef(null);
   const viewRef      = useRef(null);
@@ -2781,6 +2776,7 @@ function CodeEditor({ name, onUserSave }) {
   const ext = name.split(".").pop()?.toUpperCase() ?? "";
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: T.bg }}>
+      {!hideHeader && (
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
         borderBottom: `1px solid ${T.border}`, flexShrink: 0, fontFamily: T.mono, fontSize: 11, color: T.muted }}>
         <span style={{ color: T.orange, fontWeight: 600 }}>{ext || "TXT"}</span>
@@ -2789,7 +2785,54 @@ function CodeEditor({ name, onUserSave }) {
         {meta?.crlf && <span style={{ marginLeft: "auto", color: T.muted, fontSize: 10 }}>CRLF</span>}
         {meta?.bom  && <span style={{ marginLeft: meta?.crlf ? 6 : "auto", color: T.muted, fontSize: 10 }}>BOM</span>}
       </div>
+      )}
       <div ref={containerRef} style={{ flex: 1, overflow: "hidden" }} />
+    </div>
+  );
+}
+
+function isHtmlFile(name) {
+  const ext = name?.split(".").pop()?.toLowerCase();
+  return ext === "html" || ext === "htm";
+}
+
+// HTML files get a Preview / Code toggle. Preview renders the file in a sandboxed
+// iframe served from /raw/ (relative assets resolve naturally). The sandbox omits
+// allow-same-origin, so scripts run as a null origin and cannot reach the workspace
+// API. Live reload: on an external "updated" SSE for this file we bump a cache-buster
+// query, remounting the iframe — contentWindow.location.reload() is unavailable
+// across the sandbox origin boundary.
+function HtmlView({ name, onUserSave }) {
+  const T = useT();
+  const [mode, setMode]   = useState("preview"); // "preview" | "code"
+  const [token, setToken] = useState(() => Date.now());
+
+  useEffect(() => {
+    const onUpdate = (e) => { if (e.detail === name) setToken(Date.now()); };
+    window.addEventListener("ee:file-updated", onUpdate);
+    return () => window.removeEventListener("ee:file-updated", onUpdate);
+  }, [name]);
+
+  return (
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: T.bg }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+        borderBottom: `1px solid ${T.border}`, flexShrink: 0, fontFamily: T.mono, fontSize: 11, color: T.muted }}>
+        <span style={{ color: T.orange, fontWeight: 600 }}>HTML</span>
+        <span style={{ color: T.border2 }}>·</span>
+        <span>{name}</span>
+        <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+          <Ghost active={mode === "preview"} onClick={() => setMode("preview")} title="Rendered preview">Preview</Ghost>
+          <Ghost active={mode === "code"}    onClick={() => setMode("code")}    title="Edit source">Code</Ghost>
+        </div>
+      </div>
+      {mode === "code"
+        ? <CodeEditor key={name + ":htmlcode"} name={name} onUserSave={onUserSave} hideHeader />
+        : <iframe
+            key={token}
+            title={name}
+            src={`/raw/${enc(name)}?_r=${token}`}
+            sandbox="allow-scripts allow-forms allow-popups"
+            style={{ flex: 1, width: "100%", border: 0, background: "#fff" }} />}
     </div>
   );
 }
@@ -2851,12 +2894,14 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex" }}><CodeBrandIcon size={30} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
+        <span style={{ display: "flex" }}><HtmlBrandIcon size={30} /></span>
+        <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#facc15" }}><DuckBrandIcon size={30} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#818cf8" }}><MarpBrandIcon size={30} /></span>
       </div>
       <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
-      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · wikilinks</div>
+      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · web pages · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
           <div style={{ color: T.muted, fontSize: 9, letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>RECENT</div>
@@ -3270,6 +3315,12 @@ function App() {
 
   const connected = useSSE(useCallback((kind, ev, data) => {
     const key = `${data.name}:${kind}`;
+    // Live-reload signal for any open HTML preview of this file. Fires on the HTTP
+    // route ops (updated/created) AND on bare watcher signals (op undefined), which
+    // is how external edits — e.g. Claude writing the file — arrive. Skip deletes.
+    if (kind === "code" && data.op !== "deleted") {
+      window.dispatchEvent(new CustomEvent("ee:file-updated", { detail: data.name }));
+    }
     if (!recentSaves.current.has(key)) {
       // Use the lightweight refresh when we know the file lists haven't changed:
       // "updated" means an existing file was saved — no new name added to any list.
@@ -3443,7 +3494,9 @@ function App() {
               : active.type === "tldraw"
                 ? <TldrawEditor key={active.name + ":tldraw"} name={active.name} onUserSave={handleUserSave} />
                 : active.type === "code"
-                  ? <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />
+                  ? (isHtmlFile(active.name)
+                      ? <HtmlView key={active.name + ":html"} name={active.name} onUserSave={handleUserSave} />
+                      : <CodeEditor key={active.name + ":code"} name={active.name} onUserSave={handleUserSave} />)
                   : active.type === "table"
                     ? <TableView key={active.name + ":table"} name={active.name} T={T} onOpen={openFile}
                         onRename={newName => {
