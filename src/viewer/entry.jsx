@@ -1251,38 +1251,20 @@ function MarpBrandIcon({ size = 14 }) {
 
 function BrandMark({ onHome }) {
   const T = useT();
-  const dot = <span style={{ color: T.muted2, fontSize: 7, lineHeight: 1 }}>·</span>;
+  const [hover, setHover] = useState(false);
   return (
     <div onClick={onHome} title="Home"
-      style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0,
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ display: "flex", alignItems: "center", flexShrink: 0,
         paddingRight: 8, borderRight: `1px solid ${T.border2}`,
-        cursor: onHome ? "pointer" : "default", opacity: 1 }}>
-      <span title="Markdown notes" style={{ display: "flex", color: T.text, opacity: 0.8 }}>
-        <MarkdownBrandIcon size={13} />
-      </span>
-      {dot}
-      <span title="Excalidraw diagrams" style={{ display: "flex" }}>
-        <ExcalidrawBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="tldraw diagrams" style={{ display: "flex" }}>
-        <TldrawBrandIcon size={14} isDark={T.isDark} />
-      </span>
-      {dot}
-      <span title="Code editor" style={{ display: "flex" }}>
-        <CodeBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="HTML pages" style={{ display: "flex" }}>
-        <HtmlBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="DuckDB tables" style={{ display: "flex" }}>
-        <DuckBrandIcon size={14} />
-      </span>
-      {dot}
-      <span title="Marp slides" style={{ display: "flex", color: "#818cf8" }}>
-        <MarpBrandIcon size={14} />
+        cursor: onHome ? "pointer" : "default" }}>
+      <span style={{ display: "flex", color: hover ? T.text : T.muted, transition: "color .1s" }}>
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-label="Home">
+          <path d="M3 10.5 12 3l9 7.5" />
+          <path d="M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5" />
+          <path d="M9.5 21v-6h5v6" />
+        </svg>
       </span>
     </div>
   );
