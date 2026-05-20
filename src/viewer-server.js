@@ -1043,6 +1043,38 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         res.writeHead(405); return res.end();
       }
 
+      // ── Raw HTML preview (sandboxed iframe target) ─────────────────────────
+      // Serves an .html document — plus sibling assets it references relatively
+      // (css/js/images) — so the page renders with full fidelity. The SPA frames
+      // this under sandbox WITHOUT allow-same-origin, so any script here runs as a
+      // null origin and its requests to /api/* fail the localhost Origin check (403).
+      // That sandbox is the security boundary; do not relax it.
+      const rawMatch = pathname.match(/^\/raw\/(.+)$/);
+      if (rawMatch && method === "GET") {
+        const name = safeCodeName(rawMatch[1]);
+        if (!name) { res.writeHead(404); return res.end(); }
+        const fp = path.join(CWD, name);
+        if (!fp.startsWith(CWD + path.sep)) { res.writeHead(403); return res.end(); }
+        const RAW_TYPES = {
+          ".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8",
+          ".css":  "text/css; charset=utf-8",
+          ".js":   "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+          ".json": "application/json; charset=utf-8",
+          ".png":  "image/png",  ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+          ".gif":  "image/gif",  ".webp": "image/webp", ".svg": "image/svg+xml",
+          ".ico":  "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2",
+          ".ttf":  "font/ttf",   ".mp4": "video/mp4", ".webm": "video/webm",
+          ".mp3":  "audio/mpeg", ".wav": "audio/wav",
+        };
+        const ext = path.extname(name).toLowerCase();
+        if (!RAW_TYPES[ext]) { res.writeHead(415); return res.end(); }
+        try {
+          const buf = await fs.readFile(fp);
+          res.writeHead(200, { "Content-Type": RAW_TYPES[ext], "Cache-Control": "no-cache" });
+          return res.end(buf);
+        } catch { res.writeHead(404); return res.end(); }
+      }
+
       // ── Static media (images, audio, video referenced in notes)
       // Serve files directly from CWD so that markdown `![](img.png)` links work.
       // SVG and PDF served with attachment disposition to prevent script execution.
