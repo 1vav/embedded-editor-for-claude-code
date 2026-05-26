@@ -12,6 +12,18 @@ import { PdfView } from "./PdfView.jsx";
 import { CsvView } from "./CsvView.jsx";
 import { MarpView } from "./MarpView.jsx";
 
+// Version actually served by the running viewer process — parsed from the
+// `?v=X.Y.Z` query string the server appends to the viewer.js URL when it
+// templates index.html. This is the LIVE version of whatever is serving
+// this SPA, NOT the globally-installed package (which can differ when
+// multiple nvm Node versions each have their own global install).
+const SERVED_VERSION = (() => {
+  try {
+    const src = document.querySelector('script[src*="viewer.js"]')?.src || "";
+    return src.match(/[?&]v=([^&]+)/)?.[1] || "";
+  } catch { return ""; }
+})();
+
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
 import { EditorView, ViewPlugin, Decoration, WidgetType, lineNumbers, highlightActiveLine, keymap } from "@codemirror/view";
@@ -2223,7 +2235,7 @@ function buildMarkdownSelectionPayload(view, fileName) {
   };
 }
 
-function NoteView({ name, onNavigate, onUserSave }) {
+function NoteView({ name, onNavigate, onUserSave, onScrollSave }) {
   const T = useT();
   const sendSelection = useSendSelection();
   const [raw,       setRaw]       = useState("");
@@ -2272,6 +2284,23 @@ function NoteView({ name, onNavigate, onUserSave }) {
       if (cmViewRef.current) noteScrollCache.set(`${name}:edit`, cmViewRef.current.scrollDOM.scrollTop);
     };
   }, [name]);
+
+  // Continuous scroll capture — keeps noteScrollCache in sync with the preview
+  // pane on every scroll event, and triggers a debounced session save. This is
+  // what makes scroll position survive a hard reload mid-scroll (the unmount
+  // handler only fires on tab switch, not on reload).
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      noteScrollCache.set(`${name}:preview`, el.scrollTop);
+      const max = el.scrollHeight - el.clientHeight;
+      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
+      onScrollSave?.();
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [name, loading, onScrollSave]);
 
   // Reset mode when switching between notes
   useEffect(() => {
@@ -2388,8 +2417,22 @@ function NoteView({ name, onNavigate, onUserSave }) {
     });
     cmViewRef.current = view;
     view.scrollDOM.scrollTop = noteScrollCache.get(`${name}:edit`) ?? 0;
-    return () => { view.destroy(); cmViewRef.current = null; };
-  }, [loading, name]); // `raw` and `mode` intentionally omitted — captured once at mount
+    // Continuous scroll capture for the edit pane (mirrors the preview-pane
+    // listener above). Updates cache + triggers debounced session save.
+    const onEditScroll = () => {
+      const el = view.scrollDOM;
+      noteScrollCache.set(`${name}:edit`, el.scrollTop);
+      const max = el.scrollHeight - el.clientHeight;
+      if (max > 0) noteScrollCache.set(`${name}:pct`, el.scrollTop / max);
+      onScrollSave?.();
+    };
+    view.scrollDOM.addEventListener('scroll', onEditScroll, { passive: true });
+    return () => {
+      view.scrollDOM.removeEventListener('scroll', onEditScroll);
+      view.destroy();
+      cmViewRef.current = null;
+    };
+  }, [loading, name, onScrollSave]); // `raw` and `mode` intentionally omitted — captured once at mount
 
   // Live-update note editor theme without recreating
   useEffect(() => {
@@ -2900,7 +2943,9 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#818cf8" }}><MarpBrandIcon size={30} /></span>
       </div>
-      <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
+      <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>
+        Embedded Editor{SERVED_VERSION ? <span style={{ color: T.muted, fontWeight: 500, marginLeft: 6 }}>{SERVED_VERSION}</span> : null}
+      </div>
       <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · web pages · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
@@ -3222,17 +3267,31 @@ function App() {
   useEffect(() => { try { localStorage.setItem(tabsKey, JSON.stringify(tabs)); } catch {} }, [tabs, tabsKey]);
   useEffect(() => { try { localStorage.setItem(activeKey, JSON.stringify(active)); } catch {} }, [active, activeKey]);
 
+  // Debounced session-state save. Callable from anywhere — fires on tabs/active
+  // changes via the useEffect below, and from view components (NoteView) on
+  // scroll events via the `onScrollSave` prop. Reads the live noteScrollCache
+  // Map at fire time so the latest scroll positions are captured.
   const sessionSaveTimer = useRef(null);
-  useEffect(() => {
+  const saveSession = useCallback(() => {
     clearTimeout(sessionSaveTimer.current);
     sessionSaveTimer.current = setTimeout(() => {
       fetch(`/api/session/${encodeURIComponent(sessionId)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-        body: JSON.stringify({ activeFile: active, openTabs: tabs, scrollPosition: { x: 0, y: 0 }, panelSizes: { sidebar: 240 } }),
+        body: JSON.stringify({
+          activeFile: active,
+          openTabs: tabs,
+          // Per-file scroll positions, keyed like `<file>:preview`, `<file>:edit`,
+          // `<file>:pct`. Currently populated by NoteView only — other view types
+          // (Table, Pdf, Html, Excalidraw, tldraw) don't yet capture scroll.
+          scrollPositions: Object.fromEntries(noteScrollCache),
+          panelSizes: { sidebar: 240 }, // reserved, not yet user-resizable
+        }),
       }).catch(() => {});
     }, 500);
   }, [tabs, active, sessionId]);
+
+  useEffect(() => { saveSession(); }, [saveSession]);
 
   const sessionRestored = useRef(false);
   useEffect(() => {
@@ -3241,6 +3300,13 @@ function App() {
     fetch(`/api/session/${encodeURIComponent(sessionId)}`)
       .then(r => r.json())
       .then(state => {
+        // Hydrate noteScrollCache BEFORE setActive triggers the NoteView mount,
+        // so the layout-effect that restores scrollTop sees the saved values.
+        if (state.scrollPositions && typeof state.scrollPositions === 'object') {
+          for (const [k, v] of Object.entries(state.scrollPositions)) {
+            if (typeof v === 'number') noteScrollCache.set(k, v);
+          }
+        }
         if (!state.openTabs?.length) return;
         setTabs(state.openTabs);
         if (state.activeFile) setActive(state.activeFile);
@@ -3509,7 +3575,7 @@ function App() {
                       ? <PdfView key={active.name + ":pdf"} name={active.name} T={T} />
                       : active.type === "csv"
                         ? <CsvView key={active.name + ":csv"} name={active.name} T={T} />
-                        : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} />
+                        : <NoteView key={active.name + ":note"} name={active.name} onNavigate={openFile} onUserSave={handleUserSave} onScrollSave={saveSession} />
           }
         </div>
 
