@@ -12,6 +12,18 @@ import { PdfView } from "./PdfView.jsx";
 import { CsvView } from "./CsvView.jsx";
 import { MarpView } from "./MarpView.jsx";
 
+// Version actually served by the running viewer process — parsed from the
+// `?v=X.Y.Z` query string the server appends to the viewer.js URL when it
+// templates index.html. This is the LIVE version of whatever is serving
+// this SPA, NOT the globally-installed package (which can differ when
+// multiple nvm Node versions each have their own global install).
+const SERVED_VERSION = (() => {
+  try {
+    const src = document.querySelector('script[src*="viewer.js"]')?.src || "";
+    return src.match(/[?&]v=([^&]+)/)?.[1] || "";
+  } catch { return ""; }
+})();
+
 // ─── CodeMirror ───────────────────────────────────────────────────────────────
 
 import { EditorView, ViewPlugin, Decoration, WidgetType, lineNumbers, highlightActiveLine, keymap } from "@codemirror/view";
@@ -2900,7 +2912,9 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#818cf8" }}><MarpBrandIcon size={30} /></span>
       </div>
-      <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>Embedded Editor</div>
+      <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>
+        Embedded Editor{SERVED_VERSION ? <span style={{ color: T.muted, fontWeight: 500, marginLeft: 6 }}>{SERVED_VERSION}</span> : null}
+      </div>
       <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · web pages · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
