@@ -1,0 +1,8 @@
+name: "CodeQL config"
+
+# Skip generated bundles and vendored third-party JS — these are build
+# artifacts, not source code we own. Findings here can't be acted on
+# without modifying upstream packages.
+paths-ignore:
+  - vendor/**
+  - node_modules/**
