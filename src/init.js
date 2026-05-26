@@ -196,7 +196,7 @@ Write notes like real reports, not bullet dumps:
 const START_COMMAND = `\
 ---
 description: Start the Embedded Editor viewer (diagrams · canvases · notes · code)
-allowed-tools: Bash, mcp__Claude_Preview__preview_start
+allowed-tools: Bash, mcp__Claude_Preview__preview_start, mcp__Claude_Preview__preview_eval
 ---
 
 Start the Embedded Editor viewer and open it in the preview pane.
@@ -237,6 +237,30 @@ console.log((idx >= 0 ? 'Updated' : 'Added') + ' Embedded Editor entry on port '
 \`\`\`
 
 **Step 3.** Call \`preview_start\` with \`name: "Embedded Editor"\` — this starts the server on the project-specific port and opens the preview pane automatically.
+
+**Step 4.** Extract this chat's session ID and capture it for Step 5:
+
+\`\`\`bash
+node -e "
+const m = (process.env.PATH || '').match(/local-agent-mode-sessions\\/[^/]+\\/([0-9a-f-]{36})/);
+process.stdout.write(m ? m[1] : require('crypto').randomUUID());
+"
+\`\`\`
+
+The \`PATH\` contains \`local-agent-mode-sessions/<plugin-id>/<session-id>/bin\` in the Claude Code desktop app; for other environments a random UUID is generated as a fallback. Each chat gets a stable ID for its lifetime, and different chats in the same folder get different IDs — this is what lets each chat keep its own open tabs and active file even though they share the same viewer port.
+
+**Step 5.** Call \`mcp__Claude_Preview__preview_eval\` with the session ID from Step 4 substituted into the script. This stores it in \`localStorage\` so the SPA picks it up; if the value changed since the last reload, the page reloads into this chat's state:
+
+\`\`\`js
+(() => {
+  const next = "<SESSION_ID_FROM_STEP_4>";
+  const prev = localStorage.getItem('editorSession');
+  if (prev !== next) {
+    localStorage.setItem('editorSession', next);
+    location.reload();
+  }
+})();
+\`\`\`
 `;
 
 const STOP_COMMAND = `\
