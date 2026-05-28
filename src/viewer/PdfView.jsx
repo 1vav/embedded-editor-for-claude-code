@@ -9,56 +9,114 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = `/vendor/pdf.worker.${pdfjsLib.version}
 
 export function PdfView({ name, T }) {
   const src = `/api/pdf/${encodeURIComponent(name)}`;
-  const containerRef = useRef(null);
+  const containerRef = useRef(null);   // scroll container + canvas parent
+  const pdfDocRef = useRef(null);      // loaded pdfjs document, reused across re-renders
+  const renderTokenRef = useRef(0);    // bumped to cancel in-flight renders
   const [error, setError] = useState(null);
   const [numPages, setNumPages] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  const renderPdf = useCallback(async () => {
+  // Re-render every page at the given target page-width using the already-loaded doc.
+  // Preserves scroll fraction so the user's reading position survives a resize.
+  const renderAtWidth = useCallback(async (avail) => {
     const container = containerRef.current;
-    if (!container) return;
+    const pdf = pdfDocRef.current;
+    if (!container || !pdf) return;
+    const myToken = ++renderTokenRef.current;
+
+    const prevH = container.scrollHeight || 1;
+    const prevTop = container.scrollTop || 0;
+    const scrollFrac = prevTop / prevH;
+
+    container.replaceChildren();
+    const dpr = window.devicePixelRatio || 1;
+    for (let n = 1; n <= pdf.numPages; n++) {
+      if (myToken !== renderTokenRef.current) return;
+      const page = await pdf.getPage(n);
+      if (myToken !== renderTokenRef.current) return;
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(avail / base.width, 3);
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      canvas.style.display = "block";
+      canvas.style.margin = "0 auto 12px";
+      canvas.style.boxShadow = "0 1px 6px rgba(0,0,0,0.3)";
+      container.appendChild(canvas);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+    }
+    if (myToken === renderTokenRef.current) {
+      container.scrollTop = scrollFrac * container.scrollHeight;
+    }
+  }, []);
+
+  // Load the document once per src; initial render uses the current container width.
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
-    let pdf;
-    try {
-      const buf = await fetch(src).then(r => {
-        if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
-        return r.arrayBuffer();
-      });
-      pdf = await pdfjsLib.getDocument({ data: buf }).promise;
-      setNumPages(pdf.numPages);
-      container.replaceChildren();
-      const dpr = window.devicePixelRatio || 1;
-      // Fit page width to container (minus padding), capped so huge pages don't explode.
-      const avail = Math.max(320, container.clientWidth - 32);
-      for (let n = 1; n <= pdf.numPages; n++) {
-        const page = await pdf.getPage(n);
-        const base = page.getViewport({ scale: 1 });
-        const scale = Math.min(avail / base.width, 2);
-        const viewport = page.getViewport({ scale });
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.floor(viewport.width * dpr);
-        canvas.height = Math.floor(viewport.height * dpr);
-        canvas.style.width = `${Math.floor(viewport.width)}px`;
-        canvas.style.height = `${Math.floor(viewport.height)}px`;
-        canvas.style.display = "block";
-        canvas.style.margin = "0 auto 12px";
-        canvas.style.boxShadow = "0 1px 6px rgba(0,0,0,0.3)";
-        container.appendChild(canvas);
-        const ctx = canvas.getContext("2d");
-        ctx.scale(dpr, dpr);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-      }
-      setLoading(false);
-    } catch (e) {
-      setError(e?.message || String(e));
-      setLoading(false);
-    } finally {
-      pdf?.destroy?.();
-    }
-  }, [src]);
+    pdfDocRef.current?.destroy?.();
+    pdfDocRef.current = null;
 
-  useEffect(() => { renderPdf(); }, [renderPdf]);
+    (async () => {
+      try {
+        const buf = await fetch(src).then(r => {
+          if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+          return r.arrayBuffer();
+        });
+        if (cancelled) return;
+        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        if (cancelled) { pdf.destroy?.(); return; }
+        pdfDocRef.current = pdf;
+        setNumPages(pdf.numPages);
+        const c = containerRef.current;
+        const avail = Math.max(320, (c?.clientWidth ?? 800) - 32);
+        await renderAtWidth(avail);
+        if (!cancelled) setLoading(false);
+      } catch (e) {
+        if (!cancelled) {
+          setError(e?.message || String(e));
+          setLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      renderTokenRef.current++;
+      pdfDocRef.current?.destroy?.();
+      pdfDocRef.current = null;
+    };
+  }, [src, renderAtWidth]);
+
+  // Re-render on container width change (debounced). Skips sub-pixel jitter and
+  // waits until the document has finished loading before reacting.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let timer = null;
+    let lastWidth = el.clientWidth;
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width;
+      if (Math.abs(w - lastWidth) < 8) return;
+      lastWidth = w;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!pdfDocRef.current) return;
+        const avail = Math.max(320, w - 32);
+        renderAtWidth(avail).catch(() => {});
+      }, 120);
+    });
+    ro.observe(el);
+    return () => {
+      if (timer) clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [renderAtWidth]);
 
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", background: T.bg }}>

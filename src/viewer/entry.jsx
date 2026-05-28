@@ -638,6 +638,8 @@ const NOTE_STYLES = [
     fontSize: "13px", lineHeight: "1.55", maxWidth: "800px", h1Border: true,  letterSpacing: null },
   { id: "mono",     label: "Mono",     noteFont: MONO,
     fontSize: "13px", lineHeight: "1.7",  maxWidth: "800px", h1Border: false, letterSpacing: null },
+  { id: "wide",     label: "Wide",     noteFont: NOTE_FONT,
+    fontSize: "15px", lineHeight: "1.7",  maxWidth: "100%",  h1Border: false, letterSpacing: null },
 ];
 
 // null colors = follow the global app theme (DARK/LIGHT)
@@ -2638,7 +2640,7 @@ function NoteView({ name, onNavigate, onUserSave, onScrollSave }) {
             visibility: mode === "preview" ? "visible" : "hidden",
             pointerEvents: mode === "preview" ? "auto" : "none",
           }}>
-            <div onClick={handleClick} onContextMenu={handleContextMenu} style={{ padding: "28px 32px", maxWidth: 720, margin: "0 auto" }}>
+            <div onClick={handleClick} onContextMenu={handleContextMenu} style={{ padding: "28px 32px", maxWidth: S.maxWidth, margin: "0 auto" }}>
               <style>{noteStyles}</style>
               <FrontmatterPanel fm={noteFm} T={N} />
               {segs.reduce((acc, seg) => {
