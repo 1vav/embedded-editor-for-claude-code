@@ -51,6 +51,11 @@ const RECENT_F_OLD = path.join(CWD, ".excalidraw-recent.json");
 if (existsSync(RECENT_F_OLD) && !existsSync(RECENT_F)) {
   try { renameSync(RECENT_F_OLD, RECENT_F); } catch {}
 }
+
+// Paths inside these dirs are noise — keep them out of SSE broadcasts and the
+// recent list so dependency installs / build artefacts don't drown user files.
+const NOISE_DIR_RE = /(?:^|[\\/])(node_modules|\.git|\.excalidraw-history|\.editor-history|\.next|\.cache|\.venv|dist|build|target|vendor)(?:$|[\\/])/i;
+const isNoisePath = (p) => NOISE_DIR_RE.test(String(p || ""));
 const HIST_DIR   = path.join(CWD, ".excalidraw-history");
 
 // Render cache — keyed by diagram name, invalidated on write
@@ -102,6 +107,7 @@ const debounces = new Map();
 try {
   watch(CWD, { recursive: true }, (_, filename) => {
     if (!filename) return;
+    if (isNoisePath(filename)) return;
     let event;
     if      (filename.endsWith(".excalidraw")) event = "diagram:changed";
     else if (filename.endsWith(".tldraw"))     event = "tldraw:changed";
@@ -516,7 +522,10 @@ export async function startViewerServer(port = DEFAULT_PORT) {
       }
 
       // ── Recent
-      if (pathname === "/api/recent") return json(res, await loadRecent());
+      if (pathname === "/api/recent") {
+        const all = await loadRecent();
+        return json(res, all.filter(r => !isNoisePath(r.name)));
+      }
 
       // ── Session state
       if (method === "GET" && pathname.startsWith("/api/session/")) {
@@ -1070,7 +1079,17 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         if (!RAW_TYPES[ext]) { res.writeHead(415); return res.end(); }
         try {
           const buf = await fs.readFile(fp);
-          res.writeHead(200, { "Content-Type": RAW_TYPES[ext], "Cache-Control": "no-cache" });
+          const headers = { "Content-Type": RAW_TYPES[ext], "Cache-Control": "no-cache" };
+          // HTML opened in a regular browser tab (via "Open" button) runs at the
+          // editor's localhost origin, so the sandbox null-origin /api/* guard
+          // doesn't apply. Block fetch/XHR/WS back to this origin so a malicious
+          // workspace file can't call the API. CDN scripts/styles/img tiles still
+          // load — they're governed by script-src/style-src/img-src, not connect-src.
+          if (ext === ".html" || ext === ".htm") {
+            headers["Content-Security-Policy"] =
+              "connect-src https: data: blob:; form-action 'none'; frame-ancestors 'self'";
+          }
+          res.writeHead(200, headers);
           return res.end(buf);
         } catch { res.writeHead(404); return res.end(); }
       }
