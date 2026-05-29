@@ -1222,15 +1222,6 @@ const CodeBrandIcon = ({ size = 13 }) => (
   </svg>
 );
 
-// HTML5 shield silhouette
-const HtmlBrandIcon = ({ size = 13 }) => (
-  <svg width={size} height={size} viewBox="0 0 20 20" aria-label="HTML page">
-    <path d="M3 2 L4.5 17 L10 18.5 L15.5 17 L17 2Z" fill="#e34f26"/>
-    <path d="M10 3.5 L10 17 L14 15.9 L15.1 3.5Z" fill="#ef652a"/>
-    <text x="10" y="13.2" textAnchor="middle" fill="#fff" fontSize="7.5" fontFamily="monospace" fontWeight="700">5</text>
-  </svg>
-);
-
 // tldraw official favicon — tldraw/tldraw apps/dotcom/client/public/favicon.svg
 const TldrawBrandIcon = ({ size = 13, isDark }) => (
   <svg width={size} height={size} viewBox="0 0 33 33" fill="none" aria-label="tldraw">
@@ -2868,6 +2859,9 @@ function HtmlView({ name, onUserSave }) {
         <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
           <Ghost active={mode === "preview"} onClick={() => setMode("preview")} title="Rendered preview">Preview</Ghost>
           <Ghost active={mode === "code"}    onClick={() => setMode("code")}    title="Edit source">Code</Ghost>
+          <Ghost
+            onClick={() => window.open(`/raw/${enc(name)}`, "_blank", "noopener,noreferrer")}
+            title="Open in a new browser tab (full origin — needed for some interactive content like Leaflet maps)">Open ↗</Ghost>
         </div>
       </div>
       {mode === "code"
@@ -2939,8 +2933,6 @@ function EmptyState({ recent, onNew, onOpen }) {
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex" }}><CodeBrandIcon size={30} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
-        <span style={{ display: "flex" }}><HtmlBrandIcon size={30} /></span>
-        <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#facc15" }}><DuckBrandIcon size={30} /></span>
         <span style={{ color: T.muted2, fontSize: 10 }}>·</span>
         <span style={{ display: "flex", color: "#818cf8" }}><MarpBrandIcon size={30} /></span>
@@ -2948,7 +2940,7 @@ function EmptyState({ recent, onNew, onOpen }) {
       <div style={{ color: T.text, fontSize: 14, fontWeight: 700 }}>
         Embedded Editor{SERVED_VERSION ? <span style={{ color: T.muted, fontWeight: 500, marginLeft: 6 }}>{SERVED_VERSION}</span> : null}
       </div>
-      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · web pages · wikilinks</div>
+      <div style={{ color: T.muted, fontSize: 11 }}>diagrams · canvases · notes · tables · slides · wikilinks</div>
       {recent.length > 0 && (
         <div style={{ width: "min(380px,100%)", marginTop: 4 }}>
           <div style={{ color: T.muted, fontSize: 9, letterSpacing: ".1em", fontWeight: 700, marginBottom: 6 }}>RECENT</div>
