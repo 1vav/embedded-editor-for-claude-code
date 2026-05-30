@@ -1,5 +1,5 @@
 import fs from "fs/promises";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync, readdirSync } from "fs";
 import { execSync, execFileSync } from "child_process";
 import os from "os";
 import path from "path";
@@ -397,6 +397,45 @@ async function writeSettings(settingsPath) {
   await fs.writeFile(settingsPath, JSON.stringify(merged, null, 2), "utf8");
 }
 
+// Walk every nvm-managed Node version and re-install embedded-editor in each,
+// so launch.json files pinned to any of those Node's absolute paths spawn
+// the same version. Silent on systems without nvm. Non-fatal on per-Node
+// failure — we want a "best effort" sweep, not a strict guarantee.
+async function installToAllNvmNodes() {
+  const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), ".nvm");
+  const versionsDir = path.join(nvmDir, "versions", "node");
+  if (!existsSync(versionsDir)) return; // no nvm — nothing to do
+
+  // Match the same active-Node `npm` that just installed us; skip it to avoid
+  // double work. Compare by resolved real path (handles `node` symlinks).
+  const activeNode = process.execPath;
+
+  const nodes = readdirSync(versionsDir)
+    .filter(n => /^v\d+\.\d+\.\d+$/.test(n))
+    .map(name => ({
+      name,
+      nodeBin: path.join(versionsDir, name, "bin", "node"),
+      npmBin:  path.join(versionsDir, name, "bin", "npm"),
+    }))
+    .filter(n => existsSync(n.nodeBin) && existsSync(n.npmBin) && n.nodeBin !== activeNode);
+
+  if (nodes.length === 0) return;
+
+  process.stdout.write(chalk.gray(`  Syncing ${nodes.length} other nvm Node version${nodes.length === 1 ? "" : "s"}…\n`));
+  for (const n of nodes) {
+    process.stdout.write(chalk.gray(`    ${n.name.padEnd(10)} `));
+    try {
+      execSync(`"${n.npmBin}" install -g embedded-editor-for-claude-code@latest`, {
+        stdio: "pipe",
+        env: { ...process.env, PATH: `${path.dirname(n.npmBin)}:${process.env.PATH || ""}` },
+      });
+      process.stdout.write(chalk.green("✓\n"));
+    } catch (e) {
+      process.stdout.write(chalk.yellow("⚠ ") + chalk.gray((e?.stderr?.toString() || e?.message || "").split("\n")[0]) + "\n");
+    }
+  }
+}
+
 export async function runInit({ global: isGlobal = false } = {}) {
   const separator = chalk.gray("─".repeat(56));
   console.log("\n" + separator);
@@ -416,6 +455,14 @@ export async function runInit({ global: isGlobal = false } = {}) {
       process.stdout.write(" " + chalk.yellow("⚠") + "\n");
       console.log(chalk.yellow("  ⚠ ") + chalk.gray("global install failed (will fall back to npx): " + e.message.split("\n")[0]));
     }
+
+    // Also install into every other nvm-managed Node version. The launch.json
+    // that init writes will hard-code the CURRENT Node's absolute paths, but
+    // older projects may already have a launch.json pinned to a different
+    // Node's path (e.g. one created before nvm-default changed). Keeping every
+    // nvm Node in lockstep on `latest` is the cheapest way to avoid the
+    // "global says 1.5.5 but the binary Claude actually spawns is 1.2.0" trap.
+    await installToAllNvmNodes();
 
     const globalSettingsPath = path.join(os.homedir(), ".claude", "settings.json");
     await writeSettings(globalSettingsPath);

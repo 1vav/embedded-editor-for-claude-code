@@ -2,6 +2,7 @@
 import { startServer } from "../src/server.js";
 import { startViewerServer } from "../src/viewer-server.js";
 import { runInit } from "../src/init.js";
+import { runDoctor } from "../src/doctor.js";
 import { derivePort } from "../src/paths.js";
 import { ROOT } from "../src/workspace.js";
 
@@ -12,6 +13,14 @@ const command = args[0];
 if (command === "init") {
   const isGlobal = args.includes("--global") || args.includes("-g");
   await runInit({ global: isGlobal });
+  process.exit(0);
+}
+
+// ── doctor ───────────────────────────────────────────────────────────────────
+// Diagnose version drift across nvm Node installs + project launch.json files.
+// `--fix` re-installs the current version in any drifted nvm Node.
+if (command === "doctor") {
+  await runDoctor({ fix: args.includes("--fix") });
   process.exit(0);
 }
 
@@ -98,6 +107,8 @@ Usage:
   npx embedded-editor-for-claude-code init --global   Set up once for all projects
   npx embedded-editor-for-claude-code serve           Start the viewer (or MCP server if piped)
   npx embedded-editor-for-claude-code serve [port]    Viewer on a custom port
+  npx embedded-editor-for-claude-code doctor          Diagnose version drift across nvm Node installs
+  npx embedded-editor-for-claude-code doctor --fix    Auto-fix drift by reinstalling in every nvm Node
 
 Quick start (one-time global setup):
   npx embedded-editor-for-claude-code init --global
