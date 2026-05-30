@@ -342,6 +342,9 @@ export async function startViewerServer(port = DEFAULT_PORT) {
     : ext === ".css"   ? "text/css; charset=utf-8"
     : ext === ".woff2" ? "font/woff2"
     : ext === ".woff"  ? "font/woff"
+    : ext === ".ttf"   ? "font/ttf"
+    : ext === ".bcmap" ? "application/octet-stream"  // pdfjs CID character maps
+    : ext === ".pfb"   ? "application/octet-stream"  // pdfjs Type 1 fallback fonts
     : "application/octet-stream";
 
   // Kick off vendor preload in the background — do NOT await here so the HTTP
@@ -349,11 +352,22 @@ export async function startViewerServer(port = DEFAULT_PORT) {
   // The vendor request handler awaits this promise on first hit.
   const vendorReady = (async () => {
     try {
-      const entries = await fs.readdir(VENDOR_DIR);
-      // First pass: index which compressed variants exist
+      // Recursive walk — pdfjs ships cmaps/ and standard_fonts/ subdirectories
+      // that the viewer requests as /vendor/cmaps/UniJIS-H.bcmap etc.
+      async function walk(dir, prefix = "") {
+        const out = [];
+        for (const name of await fs.readdir(dir)) {
+          const full = path.join(dir, name);
+          const rel  = prefix ? `${prefix}/${name}` : name;
+          const st   = await fs.stat(full);
+          if (st.isDirectory()) out.push(...await walk(full, rel));
+          else out.push(rel);
+        }
+        return out;
+      }
+      const entries = await walk(VENDOR_DIR);
       const gzSet = new Set(entries.filter(f => f.endsWith(".gz")).map(f => f.slice(0, -3)));
       const brSet = new Set(entries.filter(f => f.endsWith(".br")).map(f => f.slice(0, -3)));
-      // Second pass: load uncompressed files (and compressed variants if present)
       await Promise.all(
         entries
           .filter(f => !f.endsWith(".gz") && !f.endsWith(".br"))
@@ -430,9 +444,9 @@ export async function startViewerServer(port = DEFAULT_PORT) {
         // once the Map is populated; only the very first request(s) may wait).
         await vendorReady;
         const basename = pathname.slice("/vendor/".length);
-        // Guard: no path traversal
-        if (basename.includes("..") || basename.includes("/")) {
-          // Allow one level of sub-path for asset files (fonts etc.) but reject traversal
+        // Guard: reject anything that resolves outside VENDOR_DIR.
+        // Sub-paths (cmaps/foo.bcmap, standard_fonts/Foxit.pfb) are allowed.
+        if (basename.includes("..")) {
           const resolved = path.resolve(VENDOR_DIR, basename);
           if (!resolved.startsWith(VENDOR_DIR + path.sep)) { res.writeHead(403); return res.end(); }
         }
