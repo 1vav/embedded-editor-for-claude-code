@@ -70,7 +70,20 @@ export function PdfView({ name, T }) {
           return r.arrayBuffer();
         });
         if (cancelled) return;
-        const pdf = await pdfjsLib.getDocument({ data: buf }).promise;
+        // cMapUrl + standardFontDataUrl are required for correct font rendering:
+        //   • cMapUrl: CID character maps for CJK and ligature-heavy embedded fonts.
+        //     Without these, glyphs like the "ffi" ligature in "Officer" render as
+        //     blanks ("O f cer").
+        //   • standardFontDataUrl: fallback fonts for the 14 standard PDF fonts
+        //     (Helvetica, Times, Courier…) that PDFs reference by name only.
+        // Both directories are bundled into vendor/ by scripts/build-viewer-bundle.mjs.
+        // Trailing slash matters — pdfjs concatenates the resource name directly.
+        const pdf = await pdfjsLib.getDocument({
+          data: buf,
+          cMapUrl: "/vendor/cmaps/",
+          cMapPacked: true,
+          standardFontDataUrl: "/vendor/standard_fonts/",
+        }).promise;
         if (cancelled) { pdf.destroy?.(); return; }
         pdfDocRef.current = pdf;
         setNumPages(pdf.numPages);

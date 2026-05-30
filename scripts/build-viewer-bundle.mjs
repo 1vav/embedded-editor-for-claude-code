@@ -13,7 +13,7 @@ import { build } from "esbuild";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createReadStream, createWriteStream } from "fs";
-import { copyFile, readFile } from "fs/promises";
+import { copyFile, readFile, mkdir, readdir, stat } from "fs/promises";
 import { pipeline } from "stream/promises";
 import { createGzip, createBrotliCompress, constants as zlibConstants } from "zlib";
 
@@ -70,6 +70,38 @@ console.log(`Bundle done in ${((Date.now() - t0) / 1000).toFixed(1)}s  →  vend
   console.log(`Copied pdf.js worker  →  vendor/pdf.worker.${pdfjsPkg.version}.min.js`);
 }
 
+// ── Copy pdf.js cmaps and standard fonts into vendor/ ────────────────────────
+// PDF.js needs these resource directories to render fonts correctly:
+//   • cmaps/         — CID character maps for CJK and ligature-heavy embedded fonts.
+//                      Without these, glyphs like the "ffi" ligature in "Officer" are
+//                      dropped or replaced with blanks ("O f cer").
+//   • standard_fonts — Foxit/Liberation fallback fonts for the 14 standard PDF fonts
+//                      (Helvetica, Times, Courier, Symbol, Dingbats) that PDFs are
+//                      allowed to reference by name without embedding.
+// PdfView.jsx points pdfjs at /vendor/cmaps/ and /vendor/standard_fonts/ via
+// cMapUrl / standardFontDataUrl. Total ~2.4 MB of binary assets — bundled into npm.
+async function copyDir(src, dst) {
+  await mkdir(dst, { recursive: true });
+  const entries = await readdir(src);
+  await Promise.all(entries.map(async name => {
+    const s = path.join(src, name);
+    const d = path.join(dst, name);
+    const st = await stat(s);
+    if (st.isDirectory()) await copyDir(s, d);
+    else await copyFile(s, d);
+  }));
+}
+{
+  const pairs = [
+    ["node_modules/pdfjs-dist/cmaps",          "vendor/cmaps"],
+    ["node_modules/pdfjs-dist/standard_fonts", "vendor/standard_fonts"],
+  ];
+  for (const [src, dst] of pairs) {
+    await copyDir(path.join(root, src), path.join(root, dst));
+    console.log(`Copied ${src.split("/").pop()}  →  ${dst}/`);
+  }
+}
+
 if (noCompress) process.exit(0);
 
 // ── Pre-compress JS and CSS for Content-Encoding serving ─────────────────────
@@ -93,7 +125,6 @@ async function compress(src) {
 }
 
 const vendorDir = path.join(root, "vendor");
-const { readdir } = await import("fs/promises");
 const vendorEntries = await readdir(vendorDir);
 const toCompress = vendorEntries.filter(f => (f.endsWith(".js") || f.endsWith(".css")) && !f.endsWith(".gz") && !f.endsWith(".br"));
 await Promise.all(toCompress.map(f => compress(path.join(vendorDir, f))));
