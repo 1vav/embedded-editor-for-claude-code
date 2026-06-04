@@ -170,6 +170,58 @@ function touchRecent(name, type) {
   }, 2000);
 }
 
+// Reconcile the recent list against the filesystem on startup.
+// The list is otherwise built only from live fs.watch events (touchRecent) and
+// HTTP opens, so files modified while the server was NOT running never appear —
+// and a restart doesn't help, because it just reloads the same persisted list.
+// Here we glob the workspace, read mtimes, and seed/refresh entries so "recent"
+// reflects what was actually worked on recently, regardless of watcher uptime.
+// Only diagram/note/tldraw/table files are scanned. `code` (and any other)
+// entries enter via explicit opens and aren't globbed here, so they're preserved
+// as-is. Scanned-type entries are rebuilt from the glob, which also prunes
+// entries for diagrams/notes that were deleted while the server was offline.
+const RECONCILE_TYPES = [
+  [".excalidraw", "diagram"],
+  [".md",         "note"],
+  [".tldraw",     "tldraw"],
+  [".duckdb",     "table"],
+];
+async function reconcileRecent() {
+  await hydrateRecent();
+  const scannedTypes = new Set(RECONCILE_TYPES.map(([, type]) => type));
+  const byKey = new Map();
+  // Carry forward only entries we won't re-derive from disk (e.g. `code`), and
+  // never noise-dir entries. Remember prior `at` for scanned types so an accurate
+  // live time (e.g. a recent open) isn't downgraded to an older mtime.
+  const priorAt = new Map();
+  for (const r of recentList) {
+    if (isNoisePath(r.name)) continue;
+    if (scannedTypes.has(r.type)) priorAt.set(`${r.type}:${r.name}`, r.at);
+    else byKey.set(`${r.type}:${r.name}`, { ...r });
+  }
+  await Promise.all(RECONCILE_TYPES.map(async ([ext, type]) => {
+    let files;
+    try {
+      files = await glob(`**/*${ext}`, { cwd: CWD, ignore: ["node_modules/**", ".excalidraw-history/**", ".editor-history/**"] });
+    } catch { return; }
+    await Promise.all(files.map(async (f) => {
+      if (isNoisePath(f)) return;
+      const name = f.slice(0, -ext.length);
+      const key  = `${type}:${name}`;
+      try {
+        const { mtimeMs } = await fs.stat(path.join(CWD, f));
+        // Prefer the later of mtime and any prior live time; never downgrade.
+        byKey.set(key, { name, type, at: Math.max(mtimeMs, priorAt.get(key) || 0) });
+      } catch { /* file vanished between glob and stat — ignore */ }
+    }));
+  }));
+  recentList = [...byKey.values()].sort((a, b) => b.at - a.at).slice(0, 30);
+  clearTimeout(recentFlushTimer);
+  recentFlushTimer = setTimeout(() => {
+    fs.writeFile(RECENT_F, JSON.stringify(recentList, null, 2), "utf8").catch(() => {});
+  }, 2000);
+}
+
 // Synchronous flush on exit so recent list isn't lost on Ctrl-C
 process.on("exit", () => {
   duckCloseAll();
@@ -1179,6 +1231,13 @@ export async function startViewerServer(port = DEFAULT_PORT) {
   await new Promise((resolve, reject) => {
     server.listen(port, "127.0.0.1", resolve);
     server.on("error", reject);
+  });
+
+  // Backfill the recent list from filesystem mtimes so files modified while the
+  // server was offline still appear (and a restart genuinely refreshes it).
+  // Fire-and-forget — never block the server from accepting connections.
+  reconcileRecent().catch((e) => {
+    process.stderr.write(`[embedded-editor] recent reconcile failed: ${e.message}\n`);
   });
 
   return server;

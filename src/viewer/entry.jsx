@@ -731,14 +731,23 @@ const api = {
 
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
-function useSSE(cb) {
+function useSSE(cb, onReconnect) {
   const [ok, setOk] = useState(false);
   const ref = useRef(cb); ref.current = cb;
+  const reRef = useRef(onReconnect); reRef.current = onReconnect;
+  const everConnected = useRef(false);
   useEffect(() => {
     let es, t;
     const connect = () => {
       es = new EventSource("/events");
-      es.onopen  = () => setOk(true);
+      es.onopen  = () => {
+        setOk(true);
+        // On a *re*connect (not the first open), the tab may have missed change
+        // events while the stream was down — resync so the file lists and recent
+        // section self-heal instead of showing stale data until a manual reload.
+        if (everConnected.current) reRef.current?.();
+        everConnected.current = true;
+      };
       es.onerror = () => { setOk(false); es.close(); t = setTimeout(connect, 2500); };
       ["diagram:changed","diagram:deleted","note:changed","note:deleted","tldraw:changed","tldraw:deleted","code:changed","table:changed","table:deleted"]
         .forEach(ev => es.addEventListener(ev, e => ref.current(ev.split(":")[0], ev.split(":")[1], JSON.parse(e.data))));
@@ -3398,7 +3407,7 @@ function App() {
       setTabs(t => t.filter(x => !(x.name === data.name && x.type === type)));
       setActive(a => (a?.name === data.name && a?.type === type) ? null : a);
     }
-  }, [refresh, refreshRecent]));
+  }, [refresh, refreshRecent]), refresh);
 
   const CODE_EXTS_CLIENT = new Set([
     "js","mjs","cjs","jsx","ts","tsx","py","go","rs","java","c","cpp","cc","cxx","h","hpp",
